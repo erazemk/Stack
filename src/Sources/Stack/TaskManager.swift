@@ -429,6 +429,14 @@ final class TaskManager {
         saveAndRefresh()
     }
 
+    /// Stop the timer for the current task if it is running
+    func stopCurrentTaskTimer() {
+        guard let current = currentTask, current.startedAt != nil else { return }
+
+        current.stopTimer()
+        saveAndRefresh()
+    }
+
     /// Make a specific in-progress task the active/current task
     /// The previous active task moves to position 1 (top of "up next")
     func makeTaskActive(_ task: StackTask) {

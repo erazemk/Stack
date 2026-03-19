@@ -19,6 +19,7 @@ extension Notification.Name {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let distributedNotificationCenter = DistributedNotificationCenter.default()
     private var hotKeyRef: EventHotKeyRef?
     private var taskManager = TaskManager()
     private var modelContainer: ModelContainer?
@@ -43,6 +44,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Set up global keyboard shortcut (Control + Option + S)
         registerHotKey()
+
+        // Stop the current task timer when the screen locks
+        distributedNotificationCenter.addObserver(
+            self,
+            selector: #selector(handleScreenLocked(_:)),
+            name: Notification.Name(rawValue: "com.apple.screenIsLocked"),
+            object: nil
+        )
     }
 
     private func setupLaunchAtLogin() {
@@ -62,6 +71,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        distributedNotificationCenter.removeObserver(
+            self,
+            name: Notification.Name(rawValue: "com.apple.screenIsLocked"),
+            object: nil
+        )
         unregisterHotKey()
     }
 
@@ -107,6 +121,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handlePopoverDidShow() {
         taskManager.checkAndClearCompletedTasksIfNeeded()
+    }
+
+    @objc private func handleScreenLocked(_ notification: Notification) {
+        Task { @MainActor in
+            taskManager.stopCurrentTaskTimer()
+        }
     }
 
     @objc private func updateStatusButton() {

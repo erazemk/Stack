@@ -88,12 +88,11 @@
 - Auto-clear does not register undo.
 
 ## Packaging (Terminal-First)
+- Always build this project via the `Makefile`; do not invoke `swift build` directly.
+- Only use `make build`. Do not run `make install` unless the user explicitly asks.
 - SwiftPM project rooted at `src/`.
 - Main sources live in `src/Sources/Stack/`.
-- Build with `make build`:
-  - `swift build --package-path src --scratch-path .build -c release`
+- `make build` will:
+  - run `swift build --package-path src --scratch-path .build -c release`
   - assemble `.app` inside `.build/Stack.app`
   - copy `Info.plist`, `AppIcon.icns`, and `en.lproj/Localizable.strings` into the bundle
-- Install with `make install`:
-  - copy app to `~/Applications/Stack.app`
-  - stop the running app first if needed

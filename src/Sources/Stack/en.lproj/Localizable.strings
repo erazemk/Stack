@@ -1,0 +1,71 @@
+/*
+  Localizable.strings
+  Stack
+
+  English localization for the Stack app
+*/
+
+// MARK: - Section Headers
+"section.currentTask" = "CURRENT TASK";
+"section.upNext" = "UP NEXT";
+"section.completed" = "COMPLETED";
+
+// MARK: - Empty State
+"emptyState.title" = "Your stack is empty";
+"emptyState.hint" = "Press ⌘N to add a task";
+"emptyState.noTasks" = "No tasks yet";
+
+// MARK: - Task Actions
+"task.deleteAll" = "Delete all";
+"task.add" = "Add";
+"task.cancel" = "Cancel";
+"task.newTask" = "New Task";
+"task.newTaskPlaceholder" = "New task...";
+"task.titlePlaceholder" = "Task title";
+"task.paused" = "(paused)";
+
+// MARK: - Button Hints (Accessibility & Help)
+"hint.pause" = "Pause (⌘S)";
+"hint.resume" = "Resume (⌘S)";
+"hint.removeTask" = "Remove task (⌘D)";
+
+// MARK: - Status Bar (Accessibility)
+"accessibility.stack" = "Stack";
+"accessibility.running" = "Running";
+"accessibility.paused" = "Paused";
+
+// MARK: - Help View
+"help.title" = "Keyboard Shortcuts";
+"help.closeHint" = "Esc to close";
+
+// MARK: - Shortcut Descriptions
+"shortcut.newTask" = "Create a new task";
+"shortcut.makeActive" = "Make focused task active";
+"shortcut.startStop" = "Start/Stop timer for active task";
+"shortcut.complete" = "Complete/Uncomplete focused task";
+"shortcut.delete" = "Delete focused task";
+"shortcut.rename" = "Rename focused task";
+"shortcut.navigate" = "Navigate between tasks";
+"shortcut.reorder" = "Reorder focused task";
+"shortcut.openStack" = "Open Stack from anywhere";
+"shortcut.toggleHelp" = "Show/hide this help menu";
+"shortcut.quit" = "Quit Stack";
+
+// MARK: - Footer
+"footer.showStack" = "Show Stack";
+"footer.showShortcuts" = "Shortcuts";
+"footer.quit" = "Quit";
+
+// MARK: - Undo Actions
+"undo.addTask" = "Add Task";
+"undo.deleteTask" = "Delete Task";
+"undo.deleteAllTasks" = "Delete All Tasks";
+"undo.renameTask" = "Rename Task";
+"undo.completeTask" = "Complete Task";
+"undo.uncompleteTask" = "Uncomplete Task";
+"undo.moveTask" = "Move Task";
+"undo.makeActive" = "Make Task Active";
+
+// MARK: - Shortcut Keys for Help Menu
+"shortcut.undo" = "Undo";
+"shortcut.redo" = "Redo";

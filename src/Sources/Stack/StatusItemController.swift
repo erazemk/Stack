@@ -10,12 +10,16 @@ import SwiftUI
 
 @MainActor
 final class StatusItemController {
+    private let popoverWidth: CGFloat = 320
+    private let defaultPopoverHeight: CGFloat = 700
+
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var eventMonitor: Any?
     private var animationTimer: Timer?
     private var currentAnimationFrame = 0
     private var currentTitle: String?
+    private var currentPopoverHeight: CGFloat = 700
 
     // Animation frames for running state
     private let runningIconFrames = [
@@ -39,7 +43,7 @@ final class StatusItemController {
 
         // Create the popover
         popover = NSPopover()
-        popover?.contentSize = NSSize(width: 320, height: 700)
+        popover?.contentSize = NSSize(width: popoverWidth, height: defaultPopoverHeight)
         popover?.behavior = .transient
         popover?.animates = true
         popover?.contentViewController = NSHostingController(rootView: contentView)
@@ -121,6 +125,15 @@ final class StatusItemController {
         button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: isRunning ? String(localized: "accessibility.running") : String(localized: "accessibility.paused"))
     }
 
+    func updatePopoverHeight(_ height: CGFloat) {
+        let clampedHeight = max(240, min(height, defaultPopoverHeight))
+        currentPopoverHeight = clampedHeight
+
+        let newSize = NSSize(width: popoverWidth, height: clampedHeight)
+        popover?.contentSize = newSize
+        popover?.contentViewController?.preferredContentSize = newSize
+    }
+
     @objc private func handleToggleNotification() {
         togglePopover()
     }
@@ -135,6 +148,10 @@ final class StatusItemController {
 
     func showPopover() {
         guard let button = statusItem?.button, let popover = popover else { return }
+
+        let size = NSSize(width: popoverWidth, height: currentPopoverHeight)
+        popover.contentSize = size
+        popover.contentViewController?.preferredContentSize = size
 
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)

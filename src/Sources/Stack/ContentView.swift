@@ -245,6 +245,21 @@ struct ContentView: View {
         }
     }
 
+    private var desiredPopoverHeight: CGFloat {
+        let warningCount = (taskManager.storageWarningMessage == nil ? 0 : 1) + (taskManager.transientErrorMessage == nil ? 0 : 1)
+        let warningHeight = CGFloat(warningCount) * 64
+
+        if showingHelp {
+            return 700
+        }
+
+        if taskManager.inProgressTasks.isEmpty && taskManager.completedTasks.isEmpty {
+            return (showingAddTask ? 360 : 320) + warningHeight
+        }
+
+        return 700
+    }
+
     var body: some View {
         Group {
             if showingHelp {
@@ -336,12 +351,17 @@ struct ContentView: View {
         .onAppear {
             setupKeyboardMonitoring()
             resetFocusToActiveTask()
+            updatePopoverHeight()
         }
         .onDisappear {
             teardownKeyboardMonitoring()
         }
+        .onChange(of: desiredPopoverHeight) { _, _ in
+            updatePopoverHeight()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .popoverDidShow)) { _ in
             resetFocusToActiveTask()
+            updatePopoverHeight()
         }
     }
 
@@ -350,6 +370,10 @@ struct ContentView: View {
         focusedIndex = 0
         showingHelp = false
         isAddFieldFocused = false
+    }
+
+    private func updatePopoverHeight() {
+        StatusItemController.shared.updatePopoverHeight(desiredPopoverHeight)
     }
 
     private func setupKeyboardMonitoring() {
@@ -793,8 +817,9 @@ struct EmptyStateView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal)
+        .padding(.vertical, 28)
     }
 }
 

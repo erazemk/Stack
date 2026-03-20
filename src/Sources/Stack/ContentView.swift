@@ -154,6 +154,43 @@ struct MarqueeText: View {
     }
 }
 
+struct InlineMessageView: View {
+    let text: String
+    let systemImage: String
+    let tint: Color
+    var onDismiss: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: systemImage)
+                .foregroundStyle(tint)
+                .padding(.top, 1)
+
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let onDismiss {
+                Button {
+                    onDismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(String(localized: "error.dismiss"))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(tint.opacity(0.12))
+        )
+    }
+}
+
 struct ContentView: View {
     @Bindable var taskManager: TaskManager
     @State private var showingAddTask = false
@@ -163,6 +200,7 @@ struct ContentView: View {
     @State private var editingTaskID: UUID? = nil
     @State private var editingTaskTitle: String = ""
     @State private var showingHelp = false
+    @State private var keyboardMonitor: Any?
 
     enum FocusSection {
         case inProgress
@@ -213,6 +251,27 @@ struct ContentView: View {
                 ShortcutsHelpView(onClose: { showingHelp = false })
             } else {
                 VStack(spacing: 0) {
+                    if let warningMessage = taskManager.storageWarningMessage {
+                        InlineMessageView(
+                            text: warningMessage,
+                            systemImage: "exclamationmark.triangle.fill",
+                            tint: .orange
+                        )
+                        .padding(.horizontal)
+                        .padding(.top)
+                    }
+
+                    if let transientErrorMessage = taskManager.transientErrorMessage {
+                        InlineMessageView(
+                            text: transientErrorMessage,
+                            systemImage: "exclamationmark.octagon.fill",
+                            tint: .red,
+                            onDismiss: { taskManager.dismissTransientError() }
+                        )
+                        .padding(.horizontal)
+                        .padding(.top, taskManager.storageWarningMessage == nil ? 16 : 8)
+                    }
+
                     // Header with current task
                     CurrentTaskHeader(
                         taskManager: taskManager,
@@ -228,34 +287,40 @@ struct ContentView: View {
 
                     Divider()
 
-                    // In-progress task list (excluding current task shown in header)
-                    if taskManager.inProgressTasks.count > 1 {
-                        InProgressTaskListView(
-                            taskManager: taskManager,
-                            focusedSection: $focusedSection,
-                            focusedIndex: $focusedIndex,
-                            editingTaskID: $editingTaskID,
-                            editingTaskTitle: $editingTaskTitle,
-                            onConfirmEdit: confirmEdit
-                        )
-                        Divider()
-                    } else if taskManager.inProgressTasks.isEmpty {
-                        EmptyStateView()
-                        Divider()
-                    }
+                    Group {
+                        // In-progress task list (excluding current task shown in header)
+                        if taskManager.inProgressTasks.count > 1 {
+                            InProgressTaskListView(
+                                taskManager: taskManager,
+                                focusedSection: $focusedSection,
+                                focusedIndex: $focusedIndex,
+                                editingTaskID: $editingTaskID,
+                                editingTaskTitle: $editingTaskTitle,
+                                onConfirmEdit: confirmEdit
+                            )
+                            Divider()
+                        } else if taskManager.inProgressTasks.isEmpty {
+                            EmptyStateView()
+                            Divider()
+                        }
 
-                    // Completed tasks section
-                    if !taskManager.completedTasks.isEmpty {
-                        CompletedTaskListView(
-                            taskManager: taskManager,
-                            focusedSection: $focusedSection,
-                            focusedIndex: $focusedIndex,
-                            editingTaskID: $editingTaskID,
-                            editingTaskTitle: $editingTaskTitle,
-                            onConfirmEdit: confirmEdit
-                        )
-                        Divider()
+                        // Completed tasks section
+                        if !taskManager.completedTasks.isEmpty {
+                            CompletedTaskListView(
+                                taskManager: taskManager,
+                                focusedSection: $focusedSection,
+                                focusedIndex: $focusedIndex,
+                                editingTaskID: $editingTaskID,
+                                editingTaskTitle: $editingTaskTitle,
+                                onConfirmEdit: confirmEdit
+                            )
+                            Divider()
+                        }
                     }
+                    .id(
+                        taskManager.inProgressTasks.map(\.id.uuidString).joined(separator: ",") + "|" +
+                        taskManager.completedTasks.map(\.id.uuidString).joined(separator: ",")
+                    )
 
                     // Add task section
                     AddTaskSection(taskManager: taskManager, showingAddTask: $showingAddTask, isAddFieldFocused: $isAddFieldFocused)
@@ -272,6 +337,9 @@ struct ContentView: View {
             setupKeyboardMonitoring()
             resetFocusToActiveTask()
         }
+        .onDisappear {
+            teardownKeyboardMonitoring()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .popoverDidShow)) { _ in
             resetFocusToActiveTask()
         }
@@ -281,10 +349,13 @@ struct ContentView: View {
         focusedSection = .inProgress
         focusedIndex = 0
         showingHelp = false
+        isAddFieldFocused = false
     }
 
     private func setupKeyboardMonitoring() {
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        guard keyboardMonitor == nil else { return }
+
+        keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             // Handle ⌘/ to toggle help
             if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "/" {
                 showingHelp.toggle()
@@ -304,17 +375,17 @@ struct ContentView: View {
             if showingAddTask {
                 // Escape to cancel add task mode
                 if event.keyCode == 53 {
-                    showingAddTask = false
-                    taskManager.newTaskTitle = ""
+                    cancelAddTask()
                     return nil
                 }
                 // Cmd+Enter to add as active task
                 if event.keyCode == 36 && event.modifierFlags.contains(.command) {
-                    if !taskManager.newTaskTitle.isEmpty {
-                        taskManager.addTask(title: taskManager.newTaskTitle, makeActive: true)
-                        taskManager.newTaskTitle = ""
-                        showingAddTask = false
-                    }
+                    submitAddTask(makeActive: true)
+                    return nil
+                }
+                // Ctrl+Enter to add to the bottom of the stack
+                if event.keyCode == 36 && event.modifierFlags.contains(.control) {
+                    submitAddTask(insertAtBottom: true)
                     return nil
                 }
                 // Let all other keys pass through to the text field
@@ -420,6 +491,33 @@ struct ContentView: View {
             }
 
             return event
+        }
+    }
+
+    private func teardownKeyboardMonitoring() {
+        if let keyboardMonitor {
+            NSEvent.removeMonitor(keyboardMonitor)
+            self.keyboardMonitor = nil
+        }
+    }
+
+    private func submitAddTask(makeActive: Bool = false, insertAtBottom: Bool = false) {
+        let title = taskManager.newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+
+        isAddFieldFocused = false
+        taskManager.addTask(title: title, makeActive: makeActive, insertAtBottom: insertAtBottom)
+        taskManager.newTaskTitle = ""
+        DispatchQueue.main.async {
+            showingAddTask = false
+        }
+    }
+
+    private func cancelAddTask() {
+        isAddFieldFocused = false
+        taskManager.newTaskTitle = ""
+        DispatchQueue.main.async {
+            showingAddTask = false
         }
     }
 
@@ -711,6 +809,14 @@ struct InProgressTaskListView: View {
     let onConfirmEdit: () -> Void
     @State private var draggingTask: StackTask?
 
+    private var visibleTaskCount: Int {
+        max(0, taskManager.inProgressTasks.count - 1)
+    }
+
+    private var listHeight: CGFloat {
+        min(max(CGFloat(visibleTaskCount) * 40 + 8, visibleTaskCount > 0 ? 52 : 0), 300)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -768,7 +874,8 @@ struct InProgressTaskListView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 8)
             }
-            .frame(maxHeight: 300)
+            .frame(height: listHeight)
+            .clipped()
         }
     }
 }
@@ -902,6 +1009,14 @@ struct CompletedTaskListView: View {
     @Binding var editingTaskTitle: String
     let onConfirmEdit: () -> Void
 
+    private var visibleTaskCount: Int {
+        taskManager.completedTasks.count
+    }
+
+    private var listHeight: CGFloat {
+        min(max(CGFloat(visibleTaskCount) * 36 + 8, visibleTaskCount > 0 ? 48 : 0), 150)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -948,7 +1063,8 @@ struct CompletedTaskListView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 8)
             }
-            .frame(maxHeight: 150)
+            .frame(height: listHeight)
+            .clipped()
         }
     }
 }
@@ -1097,15 +1213,23 @@ struct AddTaskSection: View {
     }
 
     private func addTask(makeActive: Bool = false) {
-        guard !taskManager.newTaskTitle.isEmpty else { return }
-        taskManager.addTask(title: taskManager.newTaskTitle, makeActive: makeActive)
+        let title = taskManager.newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+
+        isAddFieldFocused = false
+        taskManager.addTask(title: title, makeActive: makeActive)
         taskManager.newTaskTitle = ""
-        showingAddTask = false
+        DispatchQueue.main.async {
+            showingAddTask = false
+        }
     }
 
     private func cancelAdd() {
+        isAddFieldFocused = false
         taskManager.newTaskTitle = ""
-        showingAddTask = false
+        DispatchQueue.main.async {
+            showingAddTask = false
+        }
     }
 }
 

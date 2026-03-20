@@ -69,3 +69,11 @@
 // MARK: - Shortcut Keys for Help Menu
 "shortcut.undo" = "Undo";
 "shortcut.redo" = "Redo";
+
+// MARK: - Errors
+"error.saveFailed" = "Couldn't save your changes. Stack restored the last saved state.";
+"error.loadFailed" = "Couldn't load your saved tasks.";
+"error.persistenceRecovery" = "Couldn't open your saved tasks. Stack is running in temporary recovery mode, so changes made now won't persist.";
+"error.startupFailureTitle" = "Stack couldn't open its task storage";
+"error.startupFailureMessage" = "Please relaunch Stack. If this keeps happening, restore your data from backup or reset the app's local storage.";
+"error.dismiss" = "Dismiss";

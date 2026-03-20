@@ -56,10 +56,18 @@ struct TaskSnapshot {
     }
 }
 
+enum TaskStorageMode {
+    case persistent
+    case recoveryInMemory
+}
+
 @Observable
 @MainActor
 final class TaskManager {
     var modelContext: ModelContext?
+    var storageMode: TaskStorageMode = .persistent
+    var storageWarningMessage: String?
+    var transientErrorMessage: String?
     var inProgressTasks: [StackTask] = []
     var completedTasks: [StackTask] = []
     var isAddingTask: Bool = false
@@ -93,6 +101,17 @@ final class TaskManager {
 
     func redo() {
         undoManager.redo()
+    }
+
+    func configurePersistence(context: ModelContext, storageMode: TaskStorageMode, warningMessage: String? = nil) {
+        modelContext = context
+        self.storageMode = storageMode
+        storageWarningMessage = warningMessage
+        fetchTasks()
+    }
+
+    func dismissTransientError() {
+        transientErrorMessage = nil
     }
 
     // MARK: - Auto-clear completed tasks
@@ -144,7 +163,7 @@ final class TaskManager {
     }
 
     /// Fetch all tasks sorted by order
-    func fetchTasks() {
+    func fetchTasks(persistRepairs: Bool = true) {
         guard let context = modelContext else { return }
 
         // Fetch in-progress tasks (highest order = top of stack)
@@ -163,10 +182,13 @@ final class TaskManager {
             inProgressTasks = try context.fetch(inProgressDescriptor)
             completedTasks = try context.fetch(completedDescriptor)
 
+            var repairedTimerState = false
+
             // Ensure only the current task can have its timer running
             for (index, task) in inProgressTasks.enumerated() {
                 if index != 0 && task.startedAt != nil {
                     task.stopTimer()
+                    repairedTimerState = true
                 }
             }
 
@@ -174,25 +196,35 @@ final class TaskManager {
             for task in completedTasks {
                 if task.startedAt != nil {
                     task.stopTimer()
+                    repairedTimerState = true
                 }
             }
+
+            if repairedTimerState && persistRepairs {
+                _ = saveContext(refreshAfterSuccess: false, reloadAfterFailure: true)
+            }
+
+            updateStatusButton()
         } catch {
             print("Failed to fetch tasks: \(error)")
+            transientErrorMessage = "\(String(localized: "error.loadFailed")) \(error.localizedDescription)"
             inProgressTasks = []
             completedTasks = []
+            updateStatusButton()
         }
     }
 
     /// Add a new task
     /// - Parameters:
     ///   - title: The task title
-    ///   - makeActive: If true, makes it the active task; if false, adds as first non-active task
-    func addTask(title: String, makeActive: Bool = false) {
+    ///   - makeActive: If true, makes it the active task
+    ///   - insertAtBottom: If true, adds it to the bottom of the stack
+    func addTask(title: String, makeActive: Bool = false, insertAtBottom: Bool = false) {
         guard let context = modelContext, !title.isEmpty else { return }
 
         // Capture state for undo
         let previousCurrentSnapshot = currentTask.map { TaskSnapshot(from: $0) }
-        let previousOrders = inProgressTasks.dropFirst().map { ($0.id, $0.order) }
+        let previousOrders = inProgressTasks.map { ($0.id, $0.order) }
 
         var newTaskID: UUID!
 
@@ -207,6 +239,13 @@ final class TaskManager {
             let maxOrder = inProgressTasks.map(\.order).max() ?? -1
             let newTask = StackTask(title: title, order: maxOrder + 1)
             newTask.startTimer()
+            context.insert(newTask)
+            newTaskID = newTask.id
+        } else if insertAtBottom {
+            // Add at the bottom of the stack
+            let minOrder = inProgressTasks.map(\.order).min() ?? 0
+            let newTask = StackTask(title: title, order: minOrder - 1)
+            // Don't start timer - it's not the current task
             context.insert(newTask)
             newTaskID = newTask.id
         } else {
@@ -234,13 +273,14 @@ final class TaskManager {
                 title: taskTitle,
                 previousCurrentSnapshot: previousCurrentSnapshot,
                 previousOrders: previousOrders,
-                wasActive: makeActive || previousCurrentSnapshot == nil
+                wasActive: makeActive || previousCurrentSnapshot == nil,
+                wasInsertedAtBottom: insertAtBottom && previousCurrentSnapshot != nil
             )
         }
         undoManager.setActionName(String(localized: "undo.addTask"))
     }
 
-    private func undoAddTask(taskID: UUID, title: String, previousCurrentSnapshot: TaskSnapshot?, previousOrders: [(UUID, Int)], wasActive: Bool) {
+    private func undoAddTask(taskID: UUID, title: String, previousCurrentSnapshot: TaskSnapshot?, previousOrders: [(UUID, Int)], wasActive: Bool, wasInsertedAtBottom: Bool) {
         guard let context = modelContext else { return }
 
         // Find and delete the added task
@@ -265,7 +305,7 @@ final class TaskManager {
 
         // Register redo
         undoManager.registerUndo(withTarget: self) { manager in
-            manager.addTask(title: title, makeActive: wasActive)
+            manager.addTask(title: title, makeActive: wasActive, insertAtBottom: wasInsertedAtBottom)
         }
         undoManager.setActionName(String(localized: "undo.addTask"))
     }
@@ -276,18 +316,8 @@ final class TaskManager {
 
     /// Remove the current (top) task from the stack
     func removeCurrentTask() {
-        guard let context = modelContext, let currentTask = currentTask else { return }
-
-        // Find the next task that will become current
-        let nextTask = inProgressTasks.dropFirst().first
-
-        currentTask.stopTimer()
-        context.delete(currentTask)
-
-        // Start timer for the new current task
-        nextTask?.startTimer()
-
-        saveAndRefresh()
+        guard !inProgressTasks.isEmpty else { return }
+        removeInProgressTask(at: 0)
     }
 
     /// Toggle completion status of the current (top) task
@@ -521,10 +551,11 @@ final class TaskManager {
 
     /// Remove a specific task
     func removeTask(_ task: StackTask) {
-        guard let context = modelContext else { return }
-
-        context.delete(task)
-        saveAndRefresh()
+        if let index = inProgressTasks.firstIndex(where: { $0.id == task.id }) {
+            removeInProgressTask(at: index)
+        } else if let index = completedTasks.firstIndex(where: { $0.id == task.id }) {
+            removeCompletedTask(at: index)
+        }
     }
 
     /// Toggle completion of a specific in-progress task
@@ -756,16 +787,21 @@ final class TaskManager {
     private func undoRemoveAllInProgressTasks(snapshots: [TaskSnapshot]) {
         guard let context = modelContext else { return }
 
+        var restoredCurrentTask: StackTask?
+
         // Recreate all tasks
         for snapshot in snapshots {
             let task = snapshot.createTask()
             context.insert(task)
+
+            let restoredCurrentOrder = restoredCurrentTask?.order ?? .min
+            if restoredCurrentTask == nil || task.order > restoredCurrentOrder {
+                restoredCurrentTask = task
+            }
         }
 
-        // Start timer for the first (active) task
-        if let firstSnapshot = snapshots.first, let task = findTask(by: firstSnapshot.id) {
-            task.startTimer()
-        }
+        // Start timer for the restored current task
+        restoredCurrentTask?.startTimer()
 
         saveAndRefresh()
 
@@ -813,15 +849,55 @@ final class TaskManager {
         undoManager.setActionName(String(localized: "undo.deleteAllTasks"))
     }
 
+    func prepareForTermination() {
+        var changedTasks = false
+
+        for task in inProgressTasks where task.startedAt != nil {
+            task.stopTimer()
+            changedTasks = true
+        }
+
+        for task in completedTasks where task.startedAt != nil {
+            task.stopTimer()
+            changedTasks = true
+        }
+
+        if changedTasks {
+            _ = saveContext(refreshAfterSuccess: false, reloadAfterFailure: false)
+        }
+    }
+
     private func saveAndRefresh() {
-        guard let context = modelContext else { return }
+        _ = saveContext(refreshAfterSuccess: true, reloadAfterFailure: true)
+    }
+
+    @discardableResult
+    private func saveContext(refreshAfterSuccess: Bool, reloadAfterFailure: Bool) -> Bool {
+        guard let context = modelContext else { return false }
 
         do {
             try context.save()
-            fetchTasks()
-            updateStatusButton()
+            transientErrorMessage = nil
+
+            if refreshAfterSuccess {
+                fetchTasks()
+            } else {
+                updateStatusButton()
+            }
+
+            return true
         } catch {
             print("Failed to save: \(error)")
+            context.rollback()
+            transientErrorMessage = "\(String(localized: "error.saveFailed")) \(error.localizedDescription)"
+
+            if reloadAfterFailure {
+                fetchTasks(persistRepairs: false)
+            } else {
+                updateStatusButton()
+            }
+
+            return false
         }
     }
 

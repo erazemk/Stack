@@ -71,6 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        taskManager.prepareForTermination()
+
         distributedNotificationCenter.removeObserver(
             self,
             name: Notification.Name(rawValue: "com.apple.screenIsLocked"),
@@ -81,15 +83,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupModelContainer() {
         let schema = Schema([StackTask.self])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
         do {
-            modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
-            taskManager.modelContext = modelContainer?.mainContext
-            taskManager.fetchTasks()
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            try configureModelContainer(
+                schema: schema,
+                configuration: ModelConfiguration(schema: schema, isStoredInMemoryOnly: false),
+                storageMode: .persistent
+            )
+        } catch let persistentStoreError {
+            print("Failed to create persistent ModelContainer: \(persistentStoreError)")
+
+            do {
+                try configureModelContainer(
+                    schema: schema,
+                    configuration: ModelConfiguration(schema: schema, isStoredInMemoryOnly: true),
+                    storageMode: .recoveryInMemory,
+                    warningMessage: String(localized: "error.persistenceRecovery")
+                )
+            } catch let recoveryStoreError {
+                presentStartupFailure(
+                    persistentStoreError: persistentStoreError,
+                    recoveryStoreError: recoveryStoreError
+                )
+            }
         }
+    }
+
+    private func configureModelContainer(
+        schema: Schema,
+        configuration: ModelConfiguration,
+        storageMode: TaskStorageMode,
+        warningMessage: String? = nil
+    ) throws {
+        modelContainer = try ModelContainer(for: schema, configurations: [configuration])
+
+        if let context = modelContainer?.mainContext {
+            taskManager.configurePersistence(context: context, storageMode: storageMode, warningMessage: warningMessage)
+        }
+    }
+
+    private func presentStartupFailure(persistentStoreError: Error, recoveryStoreError: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = String(localized: "error.startupFailureTitle")
+        alert.informativeText = """
+        \(String(localized: "error.startupFailureMessage"))
+
+        Persistent store error: \(persistentStoreError.localizedDescription)
+        Recovery store error: \(recoveryStoreError.localizedDescription)
+        """
+        alert.addButton(withTitle: String(localized: "OK"))
+
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+        NSApp.terminate(nil)
     }
 
     private func setupStatusItem() {

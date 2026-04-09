@@ -89,10 +89,12 @@
 
 ## Packaging (Terminal-First)
 - Always build this project via the `Makefile`; do not invoke `swift build` directly.
-- Only use `make build`. Do not run `make install` unless the user explicitly asks.
+- After making changes, run `make` so the app is rebuilt and reinstalled in `~/Applications`.
+- Use `make build` only when the user explicitly wants a build without reinstalling.
 - SwiftPM project rooted at `src/`.
 - Main sources live in `src/Sources/Stack/`.
 - `make build` will:
   - run `swift build --package-path src --scratch-path .build -c release`
   - assemble `.app` inside `.build/Stack.app`
   - copy `Info.plist`, `AppIcon.icns`, and `en.lproj/Localizable.strings` into the bundle
+- `make` will build the app, replace `~/Applications/Stack.app`, and relaunch it if it was already running.

@@ -5,14 +5,12 @@
 //  Main view for the stack-based todo list
 //
 
+import AppKit
 import SwiftUI
-import SwiftData
-import UniformTypeIdentifiers
-import Combine
 
-// MARK: - Marquee Text View for scrolling long titles
 private struct TextWidthPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
+
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
     }
@@ -46,7 +44,6 @@ struct MarqueeText: View {
     }
 
     private var scrollDuration: Double {
-        // Consistent speed: 30 points per second
         max(1.5, Double(scrollDistance) / 30.0)
     }
 
@@ -58,8 +55,8 @@ struct MarqueeText: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .background(
-                    GeometryReader { textGeo in
-                        Color.clear.preference(key: TextWidthPreferenceKey.self, value: textGeo.size.width)
+                    GeometryReader { textGeometry in
+                        Color.clear.preference(key: TextWidthPreferenceKey.self, value: textGeometry.size.width)
                     }
                 )
                 .offset(x: offset)
@@ -78,7 +75,6 @@ struct MarqueeText: View {
             }
         }
         .onChange(of: text) {
-            // Text changed - reset everything
             stopAnimation()
             offset = 0
             animationToken = UUID()
@@ -100,6 +96,7 @@ struct MarqueeText: View {
     private func stopAnimation() {
         isAnimating = false
         animationToken = UUID()
+
         withAnimation(.none) {
             offset = 0
         }
@@ -107,15 +104,16 @@ struct MarqueeText: View {
 
     private func scheduleAnimation() {
         guard needsScroll, !isAnimating else { return }
+
         isAnimating = true
         let token = animationToken
 
-        // Initial delay before scrolling starts
         DispatchQueue.main.asyncAfter(deadline: .now() + startDelay) {
             guard token == animationToken, isAnimating, needsScroll else {
                 isAnimating = false
                 return
             }
+
             performScrollCycle(token: token)
         }
     }
@@ -128,26 +126,23 @@ struct MarqueeText: View {
 
         let duration = scrollDuration
 
-        // Scroll to the end
         withAnimation(.linear(duration: duration)) {
             offset = -scrollDistance
         }
 
-        // Wait for scroll to complete, then pause at end
         DispatchQueue.main.asyncAfter(deadline: .now() + duration + 1.5) {
             guard token == animationToken, isAnimating else { return }
 
-            // Reset to start (no animation)
             withAnimation(.none) {
                 offset = 0
             }
 
-            // Wait, then scroll again
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 guard token == animationToken, isAnimating, needsScroll else {
                     isAnimating = false
                     return
                 }
+
                 performScrollCycle(token: token)
             }
         }
@@ -194,12 +189,12 @@ struct InlineMessageView: View {
 struct ContentView: View {
     @Bindable var taskManager: TaskManager
     @State private var showingAddTask = false
+    @State private var newTaskTitle = ""
     @State private var focusedSection: FocusSection = .inProgress
-    @State private var focusedIndex: Int = 0
+    @State private var focusedIndex = 0
     @FocusState private var isAddFieldFocused: Bool
-    @State private var editingTaskID: UUID? = nil
-    @State private var editingTaskTitle: String = ""
-    @State private var showingHelp = false
+    @State private var editingTaskID: UUID?
+    @State private var editingTaskTitle = ""
     @State private var keyboardMonitor: Any?
 
     enum FocusSection {
@@ -207,146 +202,136 @@ struct ContentView: View {
         case completed
     }
 
-    /// Start editing a task
+    fileprivate static func inProgressListHeight(for taskCount: Int) -> CGFloat {
+        let visibleTaskCount = max(0, taskCount - 1)
+        return min(max(CGFloat(visibleTaskCount) * 40 + 8, visibleTaskCount > 0 ? 52 : 0), 300)
+    }
+
+    fileprivate static func completedListHeight(for taskCount: Int) -> CGFloat {
+        min(max(CGFloat(taskCount) * 36 + 8, taskCount > 0 ? 48 : 0), 150)
+    }
+
     func startEditing(task: StackTask) {
         editingTaskID = task.id
         editingTaskTitle = task.title
     }
 
-    /// Confirm the edit
     func confirmEdit() {
-        if let taskID = editingTaskID {
-            // Find the task and rename it
-            if let task = taskManager.inProgressTasks.first(where: { $0.id == taskID }) {
-                taskManager.renameTask(task, to: editingTaskTitle)
-            } else if let task = taskManager.completedTasks.first(where: { $0.id == taskID }) {
-                taskManager.renameTask(task, to: editingTaskTitle)
-            }
+        guard let editingTaskID else {
+            cancelEdit()
+            return
         }
+
+        if let task = taskManager.inProgressTasks.first(where: { $0.id == editingTaskID }) {
+            taskManager.renameTask(task, to: editingTaskTitle)
+        } else if let task = taskManager.completedTasks.first(where: { $0.id == editingTaskID }) {
+            taskManager.renameTask(task, to: editingTaskTitle)
+        }
+
         cancelEdit()
     }
 
-    /// Cancel editing
     func cancelEdit() {
         editingTaskID = nil
         editingTaskTitle = ""
     }
 
-    /// Start editing the currently focused task
     func startEditingFocused() {
         if focusedSection == .inProgress {
-            if focusedIndex < taskManager.inProgressTasks.count {
-                startEditing(task: taskManager.inProgressTasks[focusedIndex])
-            }
-        } else {
-            if focusedIndex < taskManager.completedTasks.count {
-                startEditing(task: taskManager.completedTasks[focusedIndex])
-            }
+            guard focusedIndex < taskManager.inProgressTasks.count else { return }
+            startEditing(task: taskManager.inProgressTasks[focusedIndex])
+            return
         }
+
+        guard focusedIndex < taskManager.completedTasks.count else { return }
+        startEditing(task: taskManager.completedTasks[focusedIndex])
     }
 
-    private var desiredPopoverHeight: CGFloat {
-        let warningCount = (taskManager.storageWarningMessage == nil ? 0 : 1) + (taskManager.transientErrorMessage == nil ? 0 : 1)
-        let warningHeight = CGFloat(warningCount) * 64
-
-        if showingHelp {
-            return 700
-        }
-
-        if taskManager.inProgressTasks.isEmpty && taskManager.completedTasks.isEmpty {
-            return (showingAddTask ? 360 : 320) + warningHeight
-        }
-
-        return 700
+    private var layoutSignature: String {
+        [
+            String(showingAddTask),
+            String(taskManager.inProgressTasks.count),
+            String(taskManager.completedTasks.count),
+            String(taskManager.storageWarningMessage != nil),
+            String(taskManager.transientErrorMessage != nil),
+            editingTaskID?.uuidString ?? ""
+        ].joined(separator: "|")
     }
 
     var body: some View {
-        Group {
-            if showingHelp {
-                ShortcutsHelpView(onClose: { showingHelp = false })
-            } else {
-                VStack(spacing: 0) {
-                    if let warningMessage = taskManager.storageWarningMessage {
-                        InlineMessageView(
-                            text: warningMessage,
-                            systemImage: "exclamationmark.triangle.fill",
-                            tint: .orange
-                        )
-                        .padding(.horizontal)
-                        .padding(.top)
-                    }
+        VStack(spacing: 0) {
+            if let warningMessage = taskManager.storageWarningMessage {
+                InlineMessageView(
+                    text: warningMessage,
+                    systemImage: "exclamationmark.triangle.fill",
+                    tint: .orange
+                )
+                .padding(.horizontal)
+                .padding(.top)
+            }
 
-                    if let transientErrorMessage = taskManager.transientErrorMessage {
-                        InlineMessageView(
-                            text: transientErrorMessage,
-                            systemImage: "exclamationmark.octagon.fill",
-                            tint: .red,
-                            onDismiss: { taskManager.dismissTransientError() }
-                        )
-                        .padding(.horizontal)
-                        .padding(.top, taskManager.storageWarningMessage == nil ? 16 : 8)
-                    }
+            if let transientErrorMessage = taskManager.transientErrorMessage {
+                InlineMessageView(
+                    text: transientErrorMessage,
+                    systemImage: "exclamationmark.octagon.fill",
+                    tint: .red,
+                    onDismiss: { taskManager.dismissTransientError() }
+                )
+                .padding(.horizontal)
+                .padding(.top, taskManager.storageWarningMessage == nil ? 16 : 8)
+            }
 
-                    // Header with current task
-                    CurrentTaskHeader(
+            CurrentTaskHeader(
+                taskManager: taskManager,
+                isFocused: focusedSection == .inProgress && focusedIndex == 0,
+                editingTaskID: $editingTaskID,
+                editingTaskTitle: $editingTaskTitle,
+                onConfirmEdit: confirmEdit
+            )
+            .onTapGesture {
+                focusedSection = .inProgress
+                focusedIndex = 0
+            }
+
+            Divider()
+
+            Group {
+                if taskManager.inProgressTasks.count > 1 {
+                    InProgressTaskListView(
                         taskManager: taskManager,
-                        isFocused: focusedSection == .inProgress && focusedIndex == 0,
+                        focusedSection: $focusedSection,
+                        focusedIndex: $focusedIndex,
                         editingTaskID: $editingTaskID,
                         editingTaskTitle: $editingTaskTitle,
                         onConfirmEdit: confirmEdit
                     )
-                    .onTapGesture {
-                        focusedSection = .inProgress
-                        focusedIndex = 0
-                    }
-
                     Divider()
+                } else if taskManager.inProgressTasks.isEmpty {
+                    EmptyStateView()
+                    Divider()
+                }
 
-                    Group {
-                        // In-progress task list (excluding current task shown in header)
-                        if taskManager.inProgressTasks.count > 1 {
-                            InProgressTaskListView(
-                                taskManager: taskManager,
-                                focusedSection: $focusedSection,
-                                focusedIndex: $focusedIndex,
-                                editingTaskID: $editingTaskID,
-                                editingTaskTitle: $editingTaskTitle,
-                                onConfirmEdit: confirmEdit
-                            )
-                            Divider()
-                        } else if taskManager.inProgressTasks.isEmpty {
-                            EmptyStateView()
-                            Divider()
-                        }
-
-                        // Completed tasks section
-                        if !taskManager.completedTasks.isEmpty {
-                            CompletedTaskListView(
-                                taskManager: taskManager,
-                                focusedSection: $focusedSection,
-                                focusedIndex: $focusedIndex,
-                                editingTaskID: $editingTaskID,
-                                editingTaskTitle: $editingTaskTitle,
-                                onConfirmEdit: confirmEdit
-                            )
-                            Divider()
-                        }
-                    }
-                    .id(
-                        taskManager.inProgressTasks.map(\.id.uuidString).joined(separator: ",") + "|" +
-                        taskManager.completedTasks.map(\.id.uuidString).joined(separator: ",")
+                if !taskManager.completedTasks.isEmpty {
+                    CompletedTaskListView(
+                        taskManager: taskManager,
+                        focusedSection: $focusedSection,
+                        focusedIndex: $focusedIndex,
+                        editingTaskID: $editingTaskID,
+                        editingTaskTitle: $editingTaskTitle,
+                        onConfirmEdit: confirmEdit
                     )
-
-                    // Add task section
-                    AddTaskSection(taskManager: taskManager, showingAddTask: $showingAddTask, isAddFieldFocused: $isAddFieldFocused)
-
                     Divider()
-
-                    // Footer with shortcuts and quit
-                    FooterView()
                 }
             }
+
+            AddTaskSection(
+                newTaskTitle: $newTaskTitle,
+                showingAddTask: $showingAddTask,
+                isAddFieldFocused: $isAddFieldFocused,
+                onAddTask: submitAddTask
+            )
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             setupKeyboardMonitoring()
@@ -356,7 +341,7 @@ struct ContentView: View {
         .onDisappear {
             teardownKeyboardMonitoring()
         }
-        .onChange(of: desiredPopoverHeight) { _, _ in
+        .onChange(of: layoutSignature) { _, _ in
             updatePopoverHeight()
         }
         .onReceive(NotificationCenter.default.publisher(for: .popoverDidShow)) { _ in
@@ -368,69 +353,52 @@ struct ContentView: View {
     private func resetFocusToActiveTask() {
         focusedSection = .inProgress
         focusedIndex = 0
-        showingHelp = false
+        showingAddTask = false
+        newTaskTitle = ""
         isAddFieldFocused = false
+        cancelEdit()
     }
 
     private func updatePopoverHeight() {
-        StatusItemController.shared.updatePopoverHeight(desiredPopoverHeight)
+        StatusItemController.shared.updatePopoverHeight()
+
+        DispatchQueue.main.async {
+            StatusItemController.shared.updatePopoverHeight()
+        }
     }
 
     private func setupKeyboardMonitoring() {
         guard keyboardMonitor == nil else { return }
 
         keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // Handle ⌘/ to toggle help
-            if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "/" {
-                showingHelp.toggle()
-                return nil
-            }
-
-            // When showing help, only handle Escape or ⌘? to close
-            if showingHelp {
-                if event.keyCode == 53 { // Escape
-                    showingHelp = false
-                    return nil
-                }
-                return event
-            }
-
-            // Handle keys when add task field is active
             if showingAddTask {
-                // Escape to cancel add task mode
                 if event.keyCode == 53 {
                     cancelAddTask()
                     return nil
                 }
-                // Cmd+Enter to add as active task
+
                 if event.keyCode == 36 && event.modifierFlags.contains(.command) {
                     submitAddTask(makeActive: true)
                     return nil
                 }
-                // Ctrl+Enter to add to the bottom of the stack
-                if event.keyCode == 36 && event.modifierFlags.contains(.control) {
-                    submitAddTask(insertAtBottom: true)
-                    return nil
-                }
-                // Let all other keys pass through to the text field
+
                 return event
             }
 
-            // Don't intercept keys when editing a task
             if editingTaskID != nil {
-                if event.keyCode == 53 { // Escape - cancel edit
+                if event.keyCode == 53 {
                     cancelEdit()
                     return nil
                 }
-                if event.keyCode == 36 { // Return/Enter - confirm edit
+
+                if event.keyCode == 36 {
                     confirmEdit()
                     return nil
                 }
-                // Let all other keys pass through to the text field
+
                 return event
             }
 
-            // Handle Command shortcuts
             if event.modifierFlags.contains(.command) {
                 switch event.charactersIgnoringModifiers?.lowercased() {
                 case "n":
@@ -452,13 +420,6 @@ struct ContentView: View {
                 case "r":
                     startEditingFocused()
                     return nil
-                case "z":
-                    if event.modifierFlags.contains(.shift) {
-                        taskManager.redo()
-                    } else {
-                        taskManager.undo()
-                    }
-                    return nil
                 case "q":
                     NSApplication.shared.terminate(nil)
                     return nil
@@ -467,46 +428,41 @@ struct ContentView: View {
                 }
             }
 
-            // Handle arrow keys for navigation and reordering
             let isCommandPressed = event.modifierFlags.contains(.command)
 
             switch event.keyCode {
-            case 126: // Up arrow
+            case 126:
                 if isCommandPressed {
                     moveCurrentFocusedUp()
                 } else {
                     navigateUp()
                 }
                 return nil
-
-            case 125: // Down arrow
+            case 125:
                 if isCommandPressed {
                     moveCurrentFocusedDown()
                 } else {
                     navigateDown()
                 }
                 return nil
-
-            case 36: // Return/Enter - toggle completion of focused task
+            case 36:
                 toggleCurrentFocusedCompletion()
                 return nil
-
-            case 53: // Escape - clear focus / reset to first
+            case 53:
                 focusedSection = .inProgress
                 focusedIndex = 0
                 return nil
-
             default:
                 break
             }
 
-            // Handle number keys 0-9 for quick task selection (in-progress only)
-            if let chars = event.charactersIgnoringModifiers, chars.count == 1,
-               let digit = chars.first, digit.isNumber,
+            if let chars = event.charactersIgnoringModifiers,
+               chars.count == 1,
+               let digit = chars.first,
+               digit.isNumber,
                !event.modifierFlags.contains(.command) {
-                let num = digit.wholeNumberValue ?? 0
-                // 1 = index 0 (active task), 2-9 = index 1-8, 0 = index 9
-                let targetIndex = num == 0 ? 9 : num - 1
+                let number = digit.wholeNumberValue ?? 0
+                let targetIndex = number == 0 ? 9 : number - 1
                 if targetIndex < taskManager.inProgressTasks.count {
                     focusedSection = .inProgress
                     focusedIndex = targetIndex
@@ -519,19 +475,19 @@ struct ContentView: View {
     }
 
     private func teardownKeyboardMonitoring() {
-        if let keyboardMonitor {
-            NSEvent.removeMonitor(keyboardMonitor)
-            self.keyboardMonitor = nil
-        }
+        guard let keyboardMonitor else { return }
+        NSEvent.removeMonitor(keyboardMonitor)
+        self.keyboardMonitor = nil
     }
 
-    private func submitAddTask(makeActive: Bool = false, insertAtBottom: Bool = false) {
-        let title = taskManager.newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func submitAddTask(makeActive: Bool = false) {
+        let title = newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
 
         isAddFieldFocused = false
-        taskManager.addTask(title: title, makeActive: makeActive, insertAtBottom: insertAtBottom)
-        taskManager.newTaskTitle = ""
+        taskManager.addTask(title: title, makeActive: makeActive)
+        newTaskTitle = ""
+
         DispatchQueue.main.async {
             showingAddTask = false
         }
@@ -539,7 +495,8 @@ struct ContentView: View {
 
     private func cancelAddTask() {
         isAddFieldFocused = false
-        taskManager.newTaskTitle = ""
+        newTaskTitle = ""
+
         DispatchQueue.main.async {
             showingAddTask = false
         }
@@ -550,15 +507,14 @@ struct ContentView: View {
             if focusedIndex > 0 {
                 focusedIndex -= 1
             }
-        } else {
-            // In completed section
-            if focusedIndex > 0 {
-                focusedIndex -= 1
-            } else if !taskManager.inProgressTasks.isEmpty {
-                // Move to in-progress section
-                focusedSection = .inProgress
-                focusedIndex = taskManager.inProgressTasks.count - 1
-            }
+            return
+        }
+
+        if focusedIndex > 0 {
+            focusedIndex -= 1
+        } else if !taskManager.inProgressTasks.isEmpty {
+            focusedSection = .inProgress
+            focusedIndex = taskManager.inProgressTasks.count - 1
         }
     }
 
@@ -567,94 +523,87 @@ struct ContentView: View {
             if focusedIndex < taskManager.inProgressTasks.count - 1 {
                 focusedIndex += 1
             } else if !taskManager.completedTasks.isEmpty {
-                // Move to completed section
                 focusedSection = .completed
                 focusedIndex = 0
             }
-        } else {
-            // In completed section
-            if focusedIndex < taskManager.completedTasks.count - 1 {
-                focusedIndex += 1
-            }
+            return
+        }
+
+        if focusedIndex < taskManager.completedTasks.count - 1 {
+            focusedIndex += 1
         }
     }
 
     private func moveCurrentFocusedUp() {
-        if focusedSection == .inProgress && focusedIndex > 0 {
-            taskManager.moveInProgressTaskUp(at: focusedIndex)
-            focusedIndex -= 1
-        }
-        // Can't reorder completed tasks
+        guard focusedSection == .inProgress, focusedIndex > 0 else { return }
+        taskManager.moveInProgressTaskUp(at: focusedIndex)
+        focusedIndex -= 1
     }
 
     private func moveCurrentFocusedDown() {
-        if focusedSection == .inProgress && focusedIndex < taskManager.inProgressTasks.count - 1 {
-            taskManager.moveInProgressTaskDown(at: focusedIndex)
-            focusedIndex += 1
-        }
-        // Can't reorder completed tasks
+        guard focusedSection == .inProgress,
+              focusedIndex < taskManager.inProgressTasks.count - 1 else { return }
+
+        taskManager.moveInProgressTaskDown(at: focusedIndex)
+        focusedIndex += 1
     }
 
     private func toggleCurrentFocusedCompletion() {
         if focusedSection == .inProgress {
-            if focusedIndex < taskManager.inProgressTasks.count {
-                taskManager.toggleInProgressTaskCompletion(at: focusedIndex)
-                // After completing, stay in same position or adjust if needed
-                if focusedIndex >= taskManager.inProgressTasks.count {
-                    if taskManager.inProgressTasks.isEmpty {
-                        focusedSection = .completed
-                        focusedIndex = 0
-                    } else {
-                        focusedIndex = taskManager.inProgressTasks.count - 1
-                    }
+            guard focusedIndex < taskManager.inProgressTasks.count else { return }
+            taskManager.toggleInProgressTaskCompletion(at: focusedIndex)
+
+            if focusedIndex >= taskManager.inProgressTasks.count {
+                if taskManager.inProgressTasks.isEmpty {
+                    focusedSection = .completed
+                    focusedIndex = 0
+                } else {
+                    focusedIndex = taskManager.inProgressTasks.count - 1
                 }
             }
-        } else {
-            if focusedIndex < taskManager.completedTasks.count {
-                taskManager.toggleCompletedTaskCompletion(at: focusedIndex)
-                // After uncompleting, move focus to in-progress section
-                focusedSection = .inProgress
-                focusedIndex = 0
-            }
+            return
         }
+
+        guard focusedIndex < taskManager.completedTasks.count else { return }
+        taskManager.toggleCompletedTaskCompletion(at: focusedIndex)
+        focusedSection = .inProgress
+        focusedIndex = 0
     }
 
     private func deleteCurrentFocused() {
         if focusedSection == .inProgress {
-            if focusedIndex < taskManager.inProgressTasks.count {
-                taskManager.removeInProgressTask(at: focusedIndex)
-                if focusedIndex >= taskManager.inProgressTasks.count && taskManager.inProgressTasks.count > 0 {
-                    focusedIndex = taskManager.inProgressTasks.count - 1
-                } else if taskManager.inProgressTasks.isEmpty && !taskManager.completedTasks.isEmpty {
-                    focusedSection = .completed
-                    focusedIndex = 0
-                }
+            guard focusedIndex < taskManager.inProgressTasks.count else { return }
+            taskManager.removeInProgressTask(at: focusedIndex)
+
+            if focusedIndex >= taskManager.inProgressTasks.count && !taskManager.inProgressTasks.isEmpty {
+                focusedIndex = taskManager.inProgressTasks.count - 1
+            } else if taskManager.inProgressTasks.isEmpty && !taskManager.completedTasks.isEmpty {
+                focusedSection = .completed
+                focusedIndex = 0
             }
-        } else {
-            if focusedIndex < taskManager.completedTasks.count {
-                taskManager.removeCompletedTask(at: focusedIndex)
-                if focusedIndex >= taskManager.completedTasks.count && taskManager.completedTasks.count > 0 {
-                    focusedIndex = taskManager.completedTasks.count - 1
-                } else if taskManager.completedTasks.isEmpty && !taskManager.inProgressTasks.isEmpty {
-                    focusedSection = .inProgress
-                    focusedIndex = 0
-                }
-            }
+            return
+        }
+
+        guard focusedIndex < taskManager.completedTasks.count else { return }
+        taskManager.removeCompletedTask(at: focusedIndex)
+
+        if focusedIndex >= taskManager.completedTasks.count && !taskManager.completedTasks.isEmpty {
+            focusedIndex = taskManager.completedTasks.count - 1
+        } else if taskManager.completedTasks.isEmpty && !taskManager.inProgressTasks.isEmpty {
+            focusedSection = .inProgress
+            focusedIndex = 0
         }
     }
 
     private func makeCurrentFocusedActive() {
-        if focusedSection == .inProgress && focusedIndex > 0 && focusedIndex < taskManager.inProgressTasks.count {
-            // Make the focused in-progress task the active task
-            taskManager.makeInProgressTaskActive(at: focusedIndex)
-            // Move focus to the now-active task
-            focusedIndex = 0
-        }
-        // Do nothing if already on active task or in completed section
+        guard focusedSection == .inProgress,
+              focusedIndex > 0,
+              focusedIndex < taskManager.inProgressTasks.count else { return }
+
+        taskManager.makeInProgressTaskActive(at: focusedIndex)
+        focusedIndex = 0
     }
 }
-
-// MARK: - Current Task Header
 
 struct CurrentTaskHeader: View {
     let taskManager: TaskManager
@@ -662,38 +611,11 @@ struct CurrentTaskHeader: View {
     @Binding var editingTaskID: UUID?
     @Binding var editingTaskTitle: String
     let onConfirmEdit: () -> Void
-    @State private var timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    @State private var currentTime = Date()
     @FocusState private var isEditFieldFocused: Bool
 
     private var isEditing: Bool {
-        if let currentTask = taskManager.currentTask {
-            return editingTaskID == currentTask.id
-        }
-        return false
-    }
-
-    /// Format duration using currentTime to force SwiftUI updates
-    private func formattedDuration(for task: StackTask) -> String {
-        // Reference currentTime to establish SwiftUI dependency
-        _ = currentTime
-
-        var duration = task.totalDuration
-        if let started = task.startedAt {
-            duration += Date().timeIntervalSince(started)
-        }
-
-        let hours = Int(duration) / 3600
-        let minutes = (Int(duration) % 3600) / 60
-        let seconds = Int(duration) % 60
-
-        if hours > 0 {
-            return String(format: "%dh %dm", hours, minutes)
-        } else if minutes > 0 {
-            return String(format: "%dm %ds", minutes, seconds)
-        } else {
-            return String(format: "%ds", seconds)
-        }
+        guard let currentTask = taskManager.currentTask else { return false }
+        return editingTaskID == currentTask.id
     }
 
     var body: some View {
@@ -707,7 +629,6 @@ struct CurrentTaskHeader: View {
                 let isRunning = taskManager.isCurrentTaskRunning
 
                 HStack(spacing: 12) {
-                    // Play/Pause button
                     VStack(spacing: 6) {
                         Button {
                             taskManager.toggleCurrentTaskTimer()
@@ -746,17 +667,20 @@ struct CurrentTaskHeader: View {
                                 }
                         }
 
-                        HStack(spacing: 4) {
-                            Image(systemName: isRunning ? "clock" : "pause")
-                                .font(.caption2)
-                            Text(formattedDuration(for: currentTask))
-                            if !isRunning {
-                                Text("task.paused", tableName: "Localizable")
+                        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                            HStack(spacing: 4) {
+                                Image(systemName: isRunning ? "clock" : "pause")
                                     .font(.caption2)
+                                Text(currentTask.formattedDuration(at: timeline.date))
+
+                                if !isRunning {
+                                    Text("task.paused", tableName: "Localizable")
+                                        .font(.caption2)
+                                }
                             }
+                            .font(.caption)
+                            .foregroundStyle(isRunning ? Color.secondary : Color.orange)
                         }
-                        .font(.caption)
-                        .foregroundColor(isRunning ? .secondary : .orange)
                     }
 
                     Spacer()
@@ -779,15 +703,12 @@ struct CurrentTaskHeader: View {
                 .padding(12)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(isFocused ? Color.accentColor.opacity(0.2) : Color.accentColor.opacity(0.1))
+                        .fill(isFocused ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.32) : Color(nsColor: .controlBackgroundColor))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(isFocused ? Color.accentColor : Color.clear, lineWidth: 2)
+                        .stroke(isFocused ? Color(nsColor: .selectedContentBackgroundColor) : Color.clear, lineWidth: 2)
                 )
-                .onReceive(timer) { newTime in
-                    currentTime = newTime  // Force refresh to update duration display
-                }
             } else {
                 Text("emptyState.noTasks", tableName: "Localizable")
                     .font(.headline)
@@ -799,8 +720,6 @@ struct CurrentTaskHeader: View {
         .padding()
     }
 }
-
-// MARK: - Empty State
 
 struct EmptyStateView: View {
     var body: some View {
@@ -823,8 +742,6 @@ struct EmptyStateView: View {
     }
 }
 
-// MARK: - In-Progress Task List
-
 struct InProgressTaskListView: View {
     let taskManager: TaskManager
     @Binding var focusedSection: ContentView.FocusSection
@@ -832,14 +749,13 @@ struct InProgressTaskListView: View {
     @Binding var editingTaskID: UUID?
     @Binding var editingTaskTitle: String
     let onConfirmEdit: () -> Void
-    @State private var draggingTask: StackTask?
 
     private var visibleTaskCount: Int {
         max(0, taskManager.inProgressTasks.count - 1)
     }
 
     private var listHeight: CGFloat {
-        min(max(CGFloat(visibleTaskCount) * 40 + 8, visibleTaskCount > 0 ? 52 : 0), 300)
+        ContentView.inProgressListHeight(for: taskManager.inProgressTasks.count)
     }
 
     var body: some View {
@@ -885,15 +801,6 @@ struct InProgressTaskListView: View {
                             focusedSection = .inProgress
                             focusedIndex = actualIndex
                         }
-                        .onDrag {
-                            draggingTask = task
-                            return NSItemProvider(object: task.id.uuidString as NSString)
-                        }
-                        .onDrop(of: [UTType.text], delegate: InProgressTaskDropDelegate(
-                            task: task,
-                            taskManager: taskManager,
-                            draggingTask: $draggingTask
-                        ))
                     }
                 }
                 .padding(.horizontal)
@@ -921,26 +828,19 @@ struct InProgressTaskRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "line.3.horizontal")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .frame(width: 16)
-
             Text("\(position)")
                 .font(.caption)
                 .fontWeight(.medium)
                 .foregroundStyle(.tertiary)
                 .frame(width: 20)
 
-            VStack(spacing: 2) {
-                Button {
-                    taskManager.completeTask(task)
-                } label: {
-                    Image(systemName: "circle")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
+            Button {
+                taskManager.completeTask(task)
+            } label: {
+                Image(systemName: "circle")
+                    .foregroundStyle(.secondary)
             }
+            .buttonStyle(.plain)
 
             if isEditing {
                 TextField(String(localized: "task.titlePlaceholder"), text: $editingTaskTitle)
@@ -987,44 +887,15 @@ struct InProgressTaskRow: View {
         .padding(.horizontal, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isFocused ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.03))
+                .fill(isFocused ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.24) : Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(isFocused ? Color.accentColor : Color.clear, lineWidth: 1.5)
+                .stroke(isFocused ? Color(nsColor: .selectedContentBackgroundColor) : Color.clear, lineWidth: 1.5)
         )
         .contentShape(Rectangle())
     }
 }
-
-struct InProgressTaskDropDelegate: DropDelegate {
-    let task: StackTask
-    let taskManager: TaskManager
-    @Binding var draggingTask: StackTask?
-
-    func performDrop(info: DropInfo) -> Bool {
-        draggingTask = nil
-        return true
-    }
-
-    func dropEntered(info: DropInfo) {
-        guard let draggingTask = draggingTask,
-              draggingTask.id != task.id else { return }
-
-        guard let fromIndex = taskManager.inProgressTasks.firstIndex(where: { $0.id == draggingTask.id }),
-              let toIndex = taskManager.inProgressTasks.firstIndex(where: { $0.id == task.id }) else { return }
-
-        if fromIndex != toIndex {
-            taskManager.moveInProgressTask(from: fromIndex, to: toIndex)
-        }
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        return DropProposal(operation: .move)
-    }
-}
-
-// MARK: - Completed Task List
 
 struct CompletedTaskListView: View {
     let taskManager: TaskManager
@@ -1039,7 +910,7 @@ struct CompletedTaskListView: View {
     }
 
     private var listHeight: CGFloat {
-        min(max(CGFloat(visibleTaskCount) * 36 + 8, visibleTaskCount > 0 ? 48 : 0), 150)
+        ContentView.completedListHeight(for: taskManager.completedTasks.count)
     }
 
     var body: some View {
@@ -1109,15 +980,13 @@ struct CompletedTaskRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            VStack(spacing: 2) {
-                Button {
-                    taskManager.uncompleteTask(task)
-                } label: {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                }
-                .buttonStyle(.plain)
+            Button {
+                taskManager.uncompleteTask(task)
+            } label: {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
             }
+            .buttonStyle(.plain)
 
             if isEditing {
                 TextField(String(localized: "task.titlePlaceholder"), text: $editingTaskTitle)
@@ -1142,7 +1011,7 @@ struct CompletedTaskRow: View {
 
             Spacer(minLength: 8)
 
-            Text(task.formattedDuration)
+            Text(task.formattedDuration())
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
 
@@ -1168,28 +1037,31 @@ struct CompletedTaskRow: View {
         .padding(.horizontal, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isFocused ? Color.green.opacity(0.1) : Color.primary.opacity(0.02))
+                .fill(isFocused ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.24) : Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(isFocused ? Color.green : Color.clear, lineWidth: 1.5)
+                .stroke(isFocused ? Color(nsColor: .selectedContentBackgroundColor) : Color.clear, lineWidth: 1.5)
         )
         .contentShape(Rectangle())
     }
 }
 
-// MARK: - Add Task Section
-
 struct AddTaskSection: View {
-    @Bindable var taskManager: TaskManager
+    @Binding var newTaskTitle: String
     @Binding var showingAddTask: Bool
     @FocusState.Binding var isAddFieldFocused: Bool
+    let onAddTask: (Bool) -> Void
+
+    private var canAddTask: Bool {
+        !newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         VStack(spacing: 8) {
             if showingAddTask {
                 HStack(spacing: 8) {
-                    TextField(String(localized: "task.newTaskPlaceholder"), text: $taskManager.newTaskTitle)
+                    TextField(String(localized: "task.newTaskPlaceholder"), text: $newTaskTitle)
                         .textFieldStyle(.plain)
                         .font(.subheadline)
                         .focused($isAddFieldFocused)
@@ -1205,7 +1077,7 @@ struct AddTaskSection: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .disabled(taskManager.newTaskTitle.isEmpty)
+                    .disabled(!canAddTask)
 
                     Button(String(localized: "task.cancel")) {
                         cancelAdd()
@@ -1238,12 +1110,11 @@ struct AddTaskSection: View {
     }
 
     private func addTask(makeActive: Bool = false) {
-        let title = taskManager.newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return }
+        guard canAddTask else { return }
 
         isAddFieldFocused = false
-        taskManager.addTask(title: title, makeActive: makeActive)
-        taskManager.newTaskTitle = ""
+        onAddTask(makeActive)
+
         DispatchQueue.main.async {
             showingAddTask = false
         }
@@ -1251,127 +1122,10 @@ struct AddTaskSection: View {
 
     private func cancelAdd() {
         isAddFieldFocused = false
-        taskManager.newTaskTitle = ""
+        newTaskTitle = ""
+
         DispatchQueue.main.async {
             showingAddTask = false
-        }
-    }
-}
-
-// MARK: - Shortcuts Help View
-
-struct ShortcutsHelpView: View {
-    let onClose: () -> Void
-
-    private var shortcuts: [(key: String, descriptionKey: String)] {
-        [
-            ("⌘N", "shortcut.newTask"),
-            ("⌘A", "shortcut.makeActive"),
-            ("⌘S", "shortcut.startStop"),
-            ("⌘C", "shortcut.complete"),
-            ("⌘D", "shortcut.delete"),
-            ("⌘R", "shortcut.rename"),
-            ("⌘Z", "shortcut.undo"),
-            ("⌘⇧Z", "shortcut.redo"),
-            ("↑↓", "shortcut.navigate"),
-            ("⌘↑↓", "shortcut.reorder"),
-            ("⌃⌥S", "shortcut.openStack"),
-            ("⌘/", "shortcut.toggleHelp"),
-            ("⌘Q", "shortcut.quit"),
-        ]
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("help.title", tableName: "Localizable")
-                    .font(.headline)
-                Spacer()
-                Button {
-                    onClose()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding()
-
-            Divider()
-
-            // Shortcuts list
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(shortcuts, id: \.key) { shortcut in
-                        HStack {
-                            Text(shortcut.key)
-                                .font(.system(.body, design: .monospaced))
-                                .fontWeight(.medium)
-                                .foregroundStyle(.primary)
-                                .frame(width: 60, alignment: .leading)
-
-                            Text(LocalizedStringKey(shortcut.descriptionKey), tableName: "Localizable")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-
-                            Spacer()
-                        }
-                        .padding(.horizontal)
-                        .padding(.vertical, 10)
-
-                        if shortcut.key != shortcuts.last?.key {
-                            Divider()
-                                .padding(.leading, 60)
-                        }
-                    }
-                }
-            }
-
-            Divider()
-
-            // Footer hint
-            Text("help.closeHint", tableName: "Localizable")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .padding(.vertical, 12)
-        }
-    }
-}
-
-// MARK: - Footer
-
-struct FooterView: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            ShortcutHint(key: "⌃⌥S", actionKey: "footer.showStack")
-            ShortcutHint(key: "⌘/", actionKey: "footer.showShortcuts")
-            ShortcutHint(key: "⌘Q", actionKey: "footer.quit")
-            Spacer()
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-    }
-}
-
-struct ShortcutHint: View {
-    let key: String
-    let actionKey: String
-
-    var body: some View {
-        HStack(spacing: 2) {
-            Text(key)
-                .font(.caption2)
-                .fontWeight(.medium)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.primary.opacity(0.1))
-                )
-            Text(LocalizedStringKey(actionKey), tableName: "Localizable")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
     }
 }

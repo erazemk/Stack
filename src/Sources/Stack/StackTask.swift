@@ -48,17 +48,17 @@ final class StackTask {
     }
 
     /// Get the current elapsed time (including accumulated)
-    var currentDuration: TimeInterval {
+    func currentDuration(at now: Date = Date()) -> TimeInterval {
         var duration = totalDuration
-        if let started = startedAt {
-            duration += Date().timeIntervalSince(started)
+        if let startedAt {
+            duration += now.timeIntervalSince(startedAt)
         }
         return duration
     }
 
     /// Format duration as human-readable string
-    var formattedDuration: String {
-        let duration = currentDuration
+    func formattedDuration(at now: Date = Date()) -> String {
+        let duration = currentDuration(at: now)
         let hours = Int(duration) / 3600
         let minutes = (Int(duration) % 3600) / 60
         let seconds = Int(duration) % 60

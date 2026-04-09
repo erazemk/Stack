@@ -34,46 +34,10 @@
 "accessibility.running" = "Running";
 "accessibility.paused" = "Paused";
 
-// MARK: - Help View
-"help.title" = "Keyboard Shortcuts";
-"help.closeHint" = "Esc to close";
-
-// MARK: - Shortcut Descriptions
-"shortcut.newTask" = "Create a new task";
-"shortcut.makeActive" = "Make focused task active";
-"shortcut.startStop" = "Start/Stop timer for active task";
-"shortcut.complete" = "Complete/Uncomplete focused task";
-"shortcut.delete" = "Delete focused task";
-"shortcut.rename" = "Rename focused task";
-"shortcut.navigate" = "Navigate between tasks";
-"shortcut.reorder" = "Reorder focused task";
-"shortcut.openStack" = "Open Stack from anywhere";
-"shortcut.toggleHelp" = "Show/hide this help menu";
-"shortcut.quit" = "Quit Stack";
-
-// MARK: - Footer
-"footer.showStack" = "Show Stack";
-"footer.showShortcuts" = "Shortcuts";
-"footer.quit" = "Quit";
-
-// MARK: - Undo Actions
-"undo.addTask" = "Add Task";
-"undo.deleteTask" = "Delete Task";
-"undo.deleteAllTasks" = "Delete All Tasks";
-"undo.renameTask" = "Rename Task";
-"undo.completeTask" = "Complete Task";
-"undo.uncompleteTask" = "Uncomplete Task";
-"undo.moveTask" = "Move Task";
-"undo.makeActive" = "Make Task Active";
-
-// MARK: - Shortcut Keys for Help Menu
-"shortcut.undo" = "Undo";
-"shortcut.redo" = "Redo";
-
 // MARK: - Errors
-"error.saveFailed" = "Couldn't save your changes. Stack restored the last saved state.";
+"error.saveFailed" = "Couldn't save your changes.";
 "error.loadFailed" = "Couldn't load your saved tasks.";
-"error.persistenceRecovery" = "Couldn't open your saved tasks. Stack is running in temporary recovery mode, so changes made now won't persist.";
+"error.persistenceReset" = "Stack reset its local task storage after detecting an incompatible or corrupted store. Previous store files were archived, and you can continue with a fresh empty stack.";
 "error.startupFailureTitle" = "Stack couldn't open its task storage";
 "error.startupFailureMessage" = "Please relaunch Stack. If this keeps happening, restore your data from backup or reset the app's local storage.";
 "error.dismiss" = "Dismiss";

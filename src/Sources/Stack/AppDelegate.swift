@@ -2,16 +2,14 @@
 //  AppDelegate.swift
 //  Stack
 //
-//  Handles global keyboard shortcuts and app lifecycle
+//  Handles app lifecycle and persistence setup
 //
 
 import AppKit
 import SwiftUI
 import SwiftData
 import Carbon.HIToolbox
-import ServiceManagement
 
-// Notification for toggling the menu bar popover
 extension Notification.Name {
     static let toggleMenuBarPopover = Notification.Name("toggleMenuBarPopover")
     static let popoverDidShow = Notification.Name("popoverDidShow")
@@ -21,53 +19,21 @@ extension Notification.Name {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let distributedNotificationCenter = DistributedNotificationCenter.default()
     private var hotKeyRef: EventHotKeyRef?
-    private var taskManager = TaskManager()
+    private let taskManager = TaskManager()
     private var modelContainer: ModelContainer?
 
-    // Store reference for the event handler callback
-    nonisolated(unsafe) static var shared: AppDelegate?
-
     func applicationDidFinishLaunching(_ notification: Notification) {
-        AppDelegate.shared = self
-
-        // Hide dock icon for menu bar only app
         NSApp.setActivationPolicy(.accessory)
-
-        // Ensure app launches at login
-        setupLaunchAtLogin()
-
-        // Setup model container
         setupModelContainer()
-
-        // Setup the status item with content view
         setupStatusItem()
-
-        // Set up global keyboard shortcut (Control + Option + S)
         registerHotKey()
 
-        // Stop the current task timer when the screen locks
         distributedNotificationCenter.addObserver(
             self,
             selector: #selector(handleScreenLocked(_:)),
             name: Notification.Name(rawValue: "com.apple.screenIsLocked"),
             object: nil
         )
-    }
-
-    private func setupLaunchAtLogin() {
-        let service = SMAppService.mainApp
-
-        // Check if already enabled
-        if service.status != .enabled {
-            do {
-                try service.register()
-                print("Launch at login enabled")
-            } catch {
-                print("Failed to enable launch at login: \(error)")
-            }
-        } else {
-            print("Launch at login already enabled")
-        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -85,52 +51,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let schema = Schema([StackTask.self])
 
         do {
-            try configureModelContainer(
-                schema: schema,
-                configuration: ModelConfiguration(schema: schema, isStoredInMemoryOnly: false),
-                storageMode: .persistent
-            )
-        } catch let persistentStoreError {
-            print("Failed to create persistent ModelContainer: \(persistentStoreError)")
+            let storeURL = try persistentStoreURL()
 
             do {
-                try configureModelContainer(
-                    schema: schema,
-                    configuration: ModelConfiguration(schema: schema, isStoredInMemoryOnly: true),
-                    storageMode: .recoveryInMemory,
-                    warningMessage: String(localized: "error.persistenceRecovery")
-                )
-            } catch let recoveryStoreError {
-                presentStartupFailure(
-                    persistentStoreError: persistentStoreError,
-                    recoveryStoreError: recoveryStoreError
-                )
+                try configureModelContainer(schema: schema, storeURL: storeURL)
+            } catch let persistentStoreError {
+                print("Failed to create persistent ModelContainer: \(persistentStoreError)")
+                let warningMessage = try resetPersistentStore(at: storeURL)
+                try configureModelContainer(schema: schema, storeURL: storeURL, warningMessage: warningMessage)
             }
+        } catch {
+            presentStartupFailure(error)
         }
     }
 
     private func configureModelContainer(
         schema: Schema,
-        configuration: ModelConfiguration,
-        storageMode: TaskStorageMode,
+        storeURL: URL,
         warningMessage: String? = nil
     ) throws {
+        let configuration = ModelConfiguration(schema: schema, url: storeURL)
         modelContainer = try ModelContainer(for: schema, configurations: [configuration])
 
         if let context = modelContainer?.mainContext {
-            taskManager.configurePersistence(context: context, storageMode: storageMode, warningMessage: warningMessage)
+            taskManager.configurePersistence(context: context, warningMessage: warningMessage)
         }
     }
 
-    private func presentStartupFailure(persistentStoreError: Error, recoveryStoreError: Error) {
+    private func persistentStoreURL() throws -> URL {
+        let fileManager = FileManager.default
+        let appSupportDirectory = try fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let stackDirectory = appSupportDirectory.appendingPathComponent("com.erazemk.Stack", isDirectory: true)
+
+        try fileManager.createDirectory(at: stackDirectory, withIntermediateDirectories: true)
+
+        return stackDirectory.appendingPathComponent("Stack.store")
+    }
+
+    private func resetPersistentStore(at storeURL: URL) throws -> String {
+        let fileManager = FileManager.default
+        let parentDirectory = storeURL.deletingLastPathComponent()
+        let archiveDirectory = parentDirectory.appendingPathComponent("ArchivedStores", isDirectory: true)
+        let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let storeFilePrefix = storeURL.lastPathComponent
+
+        try fileManager.createDirectory(at: archiveDirectory, withIntermediateDirectories: true)
+
+        let siblingFiles = try fileManager.contentsOfDirectory(at: parentDirectory, includingPropertiesForKeys: nil)
+        for fileURL in siblingFiles where fileURL.lastPathComponent.hasPrefix(storeFilePrefix) {
+            let archivedURL = archiveDirectory.appendingPathComponent("\(timestamp)-\(fileURL.lastPathComponent)")
+            try? fileManager.removeItem(at: archivedURL)
+            try fileManager.moveItem(at: fileURL, to: archivedURL)
+        }
+
+        return String(localized: "error.persistenceReset")
+    }
+
+    private func presentStartupFailure(_ error: Error) {
         let alert = NSAlert()
         alert.alertStyle = .critical
         alert.messageText = String(localized: "error.startupFailureTitle")
         alert.informativeText = """
         \(String(localized: "error.startupFailureMessage"))
 
-        Persistent store error: \(persistentStoreError.localizedDescription)
-        Recovery store error: \(recoveryStoreError.localizedDescription)
+        \(error.localizedDescription)
         """
         alert.addButton(withTitle: String(localized: "OK"))
 
@@ -142,64 +131,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         let contentView = ContentView(taskManager: taskManager)
             .onAppear {
-                // Update button when popover appears
                 self.updateStatusButton()
             }
 
         StatusItemController.shared.setup(with: contentView)
         updateStatusButton()
-
-        // Observe task changes to update the status button
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(updateStatusButton),
-            name: .NSManagedObjectContextDidSave,
-            object: nil
-        )
-
-        // Observe popover show to check for auto-clear of completed tasks
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handlePopoverDidShow),
-            name: .popoverDidShow,
-            object: nil
-        )
-    }
-
-    @objc private func handlePopoverDidShow() {
-        taskManager.checkAndClearCompletedTasksIfNeeded()
     }
 
     @objc private func handleScreenLocked(_ notification: Notification) {
-        Task { @MainActor in
-            taskManager.stopCurrentTaskTimer()
-        }
+        taskManager.stopCurrentTaskTimer()
     }
 
     @objc private func updateStatusButton() {
-        let title = taskManager.currentTask?.title
-        let isRunning = taskManager.isCurrentTaskRunning
-        StatusItemController.shared.updateButton(title: title, isRunning: isRunning)
+        StatusItemController.shared.updateButton(
+            title: taskManager.currentTask?.title,
+            isRunning: taskManager.isCurrentTaskRunning
+        )
     }
 
     private func registerHotKey() {
-        // Define the hotkey: Control + Option + S
         let modifiers: UInt32 = UInt32(controlKey | optionKey)
         let keyCode: UInt32 = UInt32(kVK_ANSI_S)
 
-        // Create hotkey ID
         var hotKeyID = EventHotKeyID()
-        hotKeyID.signature = OSType(0x5354_434B) // "STCK" in hex
+        hotKeyID.signature = OSType(0x5354_434B)
         hotKeyID.id = 1
 
-        // Install event handler
-        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
         var eventHandlerRef: EventHandlerRef?
         let handlerStatus = InstallEventHandler(
             GetApplicationEventTarget(),
-            { (_, _, _) -> OSStatus in
-                // Post notification to toggle popover
+            { _, _, _ in
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(name: .toggleMenuBarPopover, object: nil)
                 }
@@ -213,11 +178,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if handlerStatus != noErr {
             print("Failed to install event handler: \(handlerStatus)")
-        } else {
-            print("Event handler installed successfully")
         }
 
-        // Register the hotkey
         let registerStatus = RegisterEventHotKey(
             keyCode,
             modifiers,
@@ -229,14 +191,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if registerStatus != noErr {
             print("Failed to register hotkey: \(registerStatus)")
-        } else {
-            print("Global hotkey registered successfully")
         }
     }
 
     private func unregisterHotKey() {
-        if let hotKeyRef = hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-        }
+        guard let hotKeyRef else { return }
+        UnregisterEventHotKey(hotKeyRef)
     }
 }

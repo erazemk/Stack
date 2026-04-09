@@ -15,54 +15,44 @@ final class StatusItemController {
 
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
-    private var eventMonitor: Any?
+    private var hostingController: NSHostingController<AnyView>?
     private var animationTimer: Timer?
     private var currentAnimationFrame = 0
-    private var currentTitle: String?
     private var currentPopoverHeight: CGFloat = 700
 
-    // Animation frames for running state
     private let runningIconFrames = [
         "square.3.layers.3d.bottom.filled",
         "square.3.layers.3d.middle.filled",
         "square.3.layers.3d.top.filled"
     ]
-
-    // Static icon for paused/no task state
     private let pausedIcon = "square.3.layers.3d"
-
-    var isPopoverShown = false
 
     static let shared = StatusItemController()
 
     private init() {}
 
     func setup(with contentView: some View) {
-        // Create the status item with dynamic width
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
-        // Create the popover
-        popover = NSPopover()
-        popover?.contentSize = NSSize(width: popoverWidth, height: defaultPopoverHeight)
-        popover?.behavior = .transient
-        popover?.animates = true
-        popover?.contentViewController = NSHostingController(rootView: contentView)
+        let popover = NSPopover()
+        popover.contentSize = NSSize(width: popoverWidth, height: defaultPopoverHeight)
+        popover.behavior = .transient
+        popover.animates = true
 
-        // Configure the button
+        let hostingController = NSHostingController(rootView: AnyView(contentView))
+        popover.contentViewController = hostingController
+        self.popover = popover
+        self.hostingController = hostingController
+
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: pausedIcon, accessibilityDescription: String(localized: "accessibility.stack"))
+            button.image = NSImage(
+                systemSymbolName: pausedIcon,
+                accessibilityDescription: String(localized: "accessibility.stack")
+            )
             button.action = #selector(togglePopover)
             button.target = self
         }
 
-        // Monitor for clicks outside the popover to close it
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            if self?.isPopoverShown == true {
-                self?.closePopover()
-            }
-        }
-
-        // Listen for toggle notification from hotkey
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleToggleNotification),
@@ -72,8 +62,6 @@ final class StatusItemController {
     }
 
     func updateButton(title: String?, isRunning: Bool) {
-        currentTitle = title
-
         if isRunning {
             startAnimation()
         } else {
@@ -81,29 +69,74 @@ final class StatusItemController {
             updateIcon(symbolName: pausedIcon, isRunning: false)
         }
 
-        // Update title
         guard let button = statusItem?.button else { return }
-        if let title = title {
+
+        if let title {
             let truncatedTitle = String(title.prefix(128)) + (title.count > 128 ? "…" : "")
             button.title = " " + truncatedTitle
             button.imagePosition = .imageLeading
+            return
+        }
+
+        button.title = ""
+        button.imagePosition = .imageOnly
+    }
+
+    func updatePopoverHeight() {
+        guard let popover, let hostingController else { return }
+
+        let fittedSize = hostingController.sizeThatFits(in: NSSize(width: popoverWidth, height: defaultPopoverHeight))
+        let clampedHeight = min(max(ceil(fittedSize.height), 1), defaultPopoverHeight)
+        currentPopoverHeight = clampedHeight
+
+        let size = NSSize(width: popoverWidth, height: clampedHeight)
+        popover.contentSize = size
+        hostingController.preferredContentSize = size
+    }
+
+    @objc func togglePopover() {
+        guard let popover else { return }
+
+        if popover.isShown {
+            closePopover()
         } else {
-            button.title = ""
-            button.imagePosition = .imageOnly
+            showPopover()
         }
     }
 
+    func showPopover() {
+        guard let button = statusItem?.button, let popover else { return }
+
+        updatePopoverHeight()
+
+        let size = NSSize(width: popoverWidth, height: currentPopoverHeight)
+        popover.contentSize = size
+        popover.contentViewController?.preferredContentSize = size
+
+        NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        NotificationCenter.default.post(name: .popoverDidShow, object: nil)
+
+        DispatchQueue.main.async {
+            self.updatePopoverHeight()
+        }
+    }
+
+    func closePopover() {
+        popover?.performClose(nil)
+    }
+
+    @objc private func handleToggleNotification() {
+        togglePopover()
+    }
+
     private func startAnimation() {
-        // Don't start if already animating
         guard animationTimer == nil else { return }
 
         currentAnimationFrame = 0
         updateIcon(symbolName: runningIconFrames[currentAnimationFrame], isRunning: true)
-
-        // Animate every 1 second (power-efficient)
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            Task { @MainActor [weak self] in
+            Task { @MainActor in
                 self?.advanceAnimation()
             }
         }
@@ -122,47 +155,11 @@ final class StatusItemController {
 
     private func updateIcon(symbolName: String, isRunning: Bool) {
         guard let button = statusItem?.button else { return }
-        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: isRunning ? String(localized: "accessibility.running") : String(localized: "accessibility.paused"))
-    }
-
-    func updatePopoverHeight(_ height: CGFloat) {
-        let clampedHeight = max(240, min(height, defaultPopoverHeight))
-        currentPopoverHeight = clampedHeight
-
-        let newSize = NSSize(width: popoverWidth, height: clampedHeight)
-        popover?.contentSize = newSize
-        popover?.contentViewController?.preferredContentSize = newSize
-    }
-
-    @objc private func handleToggleNotification() {
-        togglePopover()
-    }
-
-    @objc func togglePopover() {
-        if isPopoverShown {
-            closePopover()
-        } else {
-            showPopover()
-        }
-    }
-
-    func showPopover() {
-        guard let button = statusItem?.button, let popover = popover else { return }
-
-        let size = NSSize(width: popoverWidth, height: currentPopoverHeight)
-        popover.contentSize = size
-        popover.contentViewController?.preferredContentSize = size
-
-        NSApp.activate(ignoringOtherApps: true)
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        isPopoverShown = true
-
-        // Notify ContentView to reset focus to the active task
-        NotificationCenter.default.post(name: .popoverDidShow, object: nil)
-    }
-
-    func closePopover() {
-        popover?.performClose(nil)
-        isPopoverShown = false
+        button.image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: isRunning
+                ? String(localized: "accessibility.running")
+                : String(localized: "accessibility.paused")
+        )
     }
 }

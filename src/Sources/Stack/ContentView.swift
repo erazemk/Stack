@@ -353,7 +353,7 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(Color(NSColor.windowBackgroundColor).ignoresSafeArea())
         .onAppear {
             setupKeyboardMonitoring()
             resetFocusToActiveTask()
@@ -446,8 +446,6 @@ struct ContentView: View {
         case .resetFocus:
             focusedSection = .inProgress
             focusedIndex = 0
-        case .quickSelect:
-            handleQuickSelect(event)
         case .addTask:
             submitAddTask()
         case .addActiveTask:
@@ -458,20 +456,6 @@ struct ContentView: View {
             confirmEdit()
         case .cancelRename:
             cancelEdit()
-        }
-    }
-
-    private func handleQuickSelect(_ event: NSEvent) {
-        guard let chars = event.charactersIgnoringModifiers,
-              chars.count == 1,
-              let digit = chars.first,
-              digit.isNumber else { return }
-
-        let number = digit.wholeNumberValue ?? 0
-        let targetIndex = number == 0 ? 9 : number - 1
-        if targetIndex < taskManager.inProgressTasks.count {
-            focusedSection = .inProgress
-            focusedIndex = targetIndex
         }
     }
 
@@ -1131,44 +1115,48 @@ struct ShortcutsHelpView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("help.title", tableName: "Localizable")
-                .font(.headline)
-                .padding(.horizontal)
-                .padding(.top, 16)
-                .padding(.bottom, 12)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("help.title", tableName: "Localizable")
+                    .font(.headline)
+                    .padding(.horizontal)
+                    .padding(.top, 16)
+                    .padding(.bottom, 12)
 
-            ForEach(sections) { section in
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(LocalizedStringKey(section.titleKey), tableName: "Localizable")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.secondary)
+                ForEach(sections) { section in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(LocalizedStringKey(section.titleKey), tableName: "Localizable")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
 
-                    ForEach(KeyboardShortcutRegistry.shortcuts(in: section)) { shortcut in
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text(shortcut.key)
-                                .font(.system(.caption, design: .monospaced))
-                                .fontWeight(.medium)
-                                .foregroundStyle(.primary)
-                                .frame(width: 72, alignment: .leading)
+                        ForEach(KeyboardShortcutRegistry.shortcuts(in: section)) { shortcut in
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(shortcut.key)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(.primary)
+                                    .frame(width: 72, alignment: .leading)
 
-                            Text(LocalizedStringKey(shortcut.descriptionKey), tableName: "Localizable")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                Text(LocalizedStringKey(shortcut.descriptionKey), tableName: "Localizable")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                     }
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 12)
+                    .padding(.horizontal)
+                    .padding(.vertical, 12)
 
-                if section != sections.last {
-                    Divider()
+                    if section != sections.last {
+                        Divider()
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.bottom, 8)
         }
-        .padding(.bottom, 8)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 

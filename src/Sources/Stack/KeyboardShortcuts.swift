@@ -52,7 +52,6 @@ enum KeyboardShortcutAction: String, Identifiable {
     case reorderUp
     case reorderDown
     case resetFocus
-    case quickSelect
     case addTask
     case addActiveTask
     case cancelAdd
@@ -126,13 +125,11 @@ enum KeyboardShortcutRegistry {
         ),
         KeyboardShortcutDefinition(
             action: .toggleCompletion,
-            key: "⌘C / Enter",
+            key: "⌘C",
             descriptionKey: "help.shortcut.toggleCompletion",
             section: .main,
             activeModes: [.main],
-            matcher: { event in
-                exactCharacter("c", modifiers: [.command])(event) || exactKeyCode(36)(event)
-            }
+            matcher: exactCharacter("c", modifiers: [.command])
         ),
         KeyboardShortcutDefinition(
             action: .deleteTask,
@@ -199,14 +196,6 @@ enum KeyboardShortcutRegistry {
             matcher: exactKeyCode(53)
         ),
         KeyboardShortcutDefinition(
-            action: .quickSelect,
-            key: "1-9, 0",
-            descriptionKey: "help.shortcut.quickSelect",
-            section: .navigation,
-            activeModes: [.main],
-            matcher: numberKeyMatcher
-        ),
-        KeyboardShortcutDefinition(
             action: .addTask,
             key: "Enter",
             descriptionKey: "help.shortcut.addTask",
@@ -266,14 +255,6 @@ enum KeyboardShortcutRegistry {
     private static func exactKeyCode(_ keyCode: UInt16, modifiers expectedModifiers: NSEvent.ModifierFlags = []) -> (NSEvent) -> Bool {
         { event in
             normalizedModifiers(for: event) == expectedModifiers && event.keyCode == keyCode
-        }
-    }
-
-    private static var numberKeyMatcher: (NSEvent) -> Bool {
-        { event in
-            normalizedModifiers(for: event).isEmpty
-                && event.charactersIgnoringModifiers?.count == 1
-                && event.charactersIgnoringModifiers?.first?.isNumber == true
         }
     }
 

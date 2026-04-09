@@ -58,7 +58,6 @@
 "help.shortcut.reorderUp" = "Move the focused in-progress task up";
 "help.shortcut.reorderDown" = "Move the focused in-progress task down";
 "help.shortcut.resetFocus" = "Reset focus to the current task";
-"help.shortcut.quickSelect" = "Quick-select an in-progress task by position";
 "help.shortcut.addTask" = "Add the new task";
 "help.shortcut.addActiveTask" = "Add the new task as the current task";
 "help.shortcut.cancelAdd" = "Cancel adding a task";

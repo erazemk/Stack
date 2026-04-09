@@ -24,9 +24,9 @@
 "task.paused" = "(paused)";
 
 // MARK: - Shortcut Reference
-"shortcut.reference.togglePopover" = "Hide/Show";
-"shortcut.reference.help" = "Help";
-"shortcut.reference.quit" = "Quit";
+"shortcut.reference.togglePopover" = "Show/hide app";
+"shortcut.reference.help" = "Help menu";
+"shortcut.reference.quit" = "Quit app";
 
 // MARK: - Button Hints (Accessibility & Help)
 "hint.pause" = "Pause (⌘S)";

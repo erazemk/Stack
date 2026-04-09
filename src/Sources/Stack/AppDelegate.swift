@@ -13,6 +13,7 @@ import Carbon.HIToolbox
 extension Notification.Name {
     static let toggleMenuBarPopover = Notification.Name("toggleMenuBarPopover")
     static let popoverDidShow = Notification.Name("popoverDidShow")
+    static let toggleHelpView = Notification.Name("toggleHelpView")
 }
 
 @MainActor

@@ -34,6 +34,37 @@
 "accessibility.running" = "Running";
 "accessibility.paused" = "Paused";
 
+// MARK: - Help
+"help.menu.keyboardShortcuts" = "Keyboard Shortcuts";
+"help.title" = "Keyboard Shortcuts";
+"help.section.global" = "GLOBAL";
+"help.section.main" = "MAIN";
+"help.section.navigation" = "NAVIGATION";
+"help.section.addMode" = "ADD MODE";
+"help.section.renameMode" = "RENAME MODE";
+"help.section.help" = "HELP";
+"help.shortcut.togglePopover" = "Show or hide Stack from anywhere";
+"help.shortcut.toggleHelp" = "Show or hide this help view";
+"help.shortcut.closeHelp" = "Close help";
+"help.shortcut.newTask" = "Show the add-task input";
+"help.shortcut.makeActive" = "Make the focused in-progress task active";
+"help.shortcut.toggleTimer" = "Start or stop the current task timer";
+"help.shortcut.toggleCompletion" = "Complete or uncomplete the focused task";
+"help.shortcut.deleteTask" = "Delete the focused task";
+"help.shortcut.renameTask" = "Rename the focused task";
+"help.shortcut.quit" = "Quit Stack";
+"help.shortcut.navigateUp" = "Move focus up";
+"help.shortcut.navigateDown" = "Move focus down";
+"help.shortcut.reorderUp" = "Move the focused in-progress task up";
+"help.shortcut.reorderDown" = "Move the focused in-progress task down";
+"help.shortcut.resetFocus" = "Reset focus to the current task";
+"help.shortcut.quickSelect" = "Quick-select an in-progress task by position";
+"help.shortcut.addTask" = "Add the new task";
+"help.shortcut.addActiveTask" = "Add the new task as the current task";
+"help.shortcut.cancelAdd" = "Cancel adding a task";
+"help.shortcut.confirmRename" = "Confirm the task rename";
+"help.shortcut.cancelRename" = "Cancel renaming the task";
+
 // MARK: - Errors
 "error.saveFailed" = "Couldn't save your changes.";
 "error.loadFailed" = "Couldn't load your saved tasks.";

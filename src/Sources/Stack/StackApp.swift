@@ -13,10 +13,16 @@ struct StackApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        // We use a minimal Settings scene since the main UI is in the popover
-        // The actual app UI is managed by StatusItemController
         Settings {
             EmptyView()
+        }
+        .commands {
+            CommandGroup(replacing: .help) {
+                Button(String(localized: "help.menu.keyboardShortcuts")) {
+                    NotificationCenter.default.post(name: .toggleHelpView, object: nil)
+                }
+                .keyboardShortcut("/", modifiers: [.command, .shift])
+            }
         }
     }
 }

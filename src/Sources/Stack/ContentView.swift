@@ -195,6 +195,7 @@ struct ContentView: View {
     @FocusState private var isAddFieldFocused: Bool
     @State private var editingTaskID: UUID?
     @State private var editingTaskTitle = ""
+    @State private var showingHelp = false
     @State private var keyboardMonitor: Any?
 
     enum FocusSection {
@@ -249,6 +250,7 @@ struct ContentView: View {
 
     private var layoutSignature: String {
         [
+            String(showingHelp),
             String(showingAddTask),
             String(taskManager.inProgressTasks.count),
             String(taskManager.completedTasks.count),
@@ -258,78 +260,97 @@ struct ContentView: View {
         ].joined(separator: "|")
     }
 
+    private var currentShortcutMode: KeyboardShortcutMode {
+        if showingHelp {
+            return .help
+        }
+        if showingAddTask {
+            return .add
+        }
+        if editingTaskID != nil {
+            return .rename
+        }
+        return .main
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            if let warningMessage = taskManager.storageWarningMessage {
-                InlineMessageView(
-                    text: warningMessage,
-                    systemImage: "exclamationmark.triangle.fill",
-                    tint: .orange
-                )
-                .padding(.horizontal)
-                .padding(.top)
-            }
+        Group {
+            if showingHelp {
+                ShortcutsHelpView()
+            } else {
+                VStack(spacing: 0) {
+                    if let warningMessage = taskManager.storageWarningMessage {
+                        InlineMessageView(
+                            text: warningMessage,
+                            systemImage: "exclamationmark.triangle.fill",
+                            tint: .orange
+                        )
+                        .padding(.horizontal)
+                        .padding(.top)
+                    }
 
-            if let transientErrorMessage = taskManager.transientErrorMessage {
-                InlineMessageView(
-                    text: transientErrorMessage,
-                    systemImage: "exclamationmark.octagon.fill",
-                    tint: .red,
-                    onDismiss: { taskManager.dismissTransientError() }
-                )
-                .padding(.horizontal)
-                .padding(.top, taskManager.storageWarningMessage == nil ? 16 : 8)
-            }
+                    if let transientErrorMessage = taskManager.transientErrorMessage {
+                        InlineMessageView(
+                            text: transientErrorMessage,
+                            systemImage: "exclamationmark.octagon.fill",
+                            tint: .red,
+                            onDismiss: { taskManager.dismissTransientError() }
+                        )
+                        .padding(.horizontal)
+                        .padding(.top, taskManager.storageWarningMessage == nil ? 16 : 8)
+                    }
 
-            CurrentTaskHeader(
-                taskManager: taskManager,
-                isFocused: focusedSection == .inProgress && focusedIndex == 0,
-                editingTaskID: $editingTaskID,
-                editingTaskTitle: $editingTaskTitle,
-                onConfirmEdit: confirmEdit
-            )
-            .onTapGesture {
-                focusedSection = .inProgress
-                focusedIndex = 0
-            }
-
-            Divider()
-
-            Group {
-                if taskManager.inProgressTasks.count > 1 {
-                    InProgressTaskListView(
+                    CurrentTaskHeader(
                         taskManager: taskManager,
-                        focusedSection: $focusedSection,
-                        focusedIndex: $focusedIndex,
+                        isFocused: focusedSection == .inProgress && focusedIndex == 0,
                         editingTaskID: $editingTaskID,
                         editingTaskTitle: $editingTaskTitle,
                         onConfirmEdit: confirmEdit
                     )
-                    Divider()
-                } else if taskManager.inProgressTasks.isEmpty {
-                    EmptyStateView()
-                    Divider()
-                }
+                    .onTapGesture {
+                        focusedSection = .inProgress
+                        focusedIndex = 0
+                    }
 
-                if !taskManager.completedTasks.isEmpty {
-                    CompletedTaskListView(
-                        taskManager: taskManager,
-                        focusedSection: $focusedSection,
-                        focusedIndex: $focusedIndex,
-                        editingTaskID: $editingTaskID,
-                        editingTaskTitle: $editingTaskTitle,
-                        onConfirmEdit: confirmEdit
-                    )
                     Divider()
+
+                    Group {
+                        if taskManager.inProgressTasks.count > 1 {
+                            InProgressTaskListView(
+                                taskManager: taskManager,
+                                focusedSection: $focusedSection,
+                                focusedIndex: $focusedIndex,
+                                editingTaskID: $editingTaskID,
+                                editingTaskTitle: $editingTaskTitle,
+                                onConfirmEdit: confirmEdit
+                            )
+                            Divider()
+                        } else if taskManager.inProgressTasks.isEmpty {
+                            EmptyStateView()
+                            Divider()
+                        }
+
+                        if !taskManager.completedTasks.isEmpty {
+                            CompletedTaskListView(
+                                taskManager: taskManager,
+                                focusedSection: $focusedSection,
+                                focusedIndex: $focusedIndex,
+                                editingTaskID: $editingTaskID,
+                                editingTaskTitle: $editingTaskTitle,
+                                onConfirmEdit: confirmEdit
+                            )
+                            Divider()
+                        }
+                    }
+
+                    AddTaskSection(
+                        newTaskTitle: $newTaskTitle,
+                        showingAddTask: $showingAddTask,
+                        isAddFieldFocused: $isAddFieldFocused,
+                        onAddTask: submitAddTask
+                    )
                 }
             }
-
-            AddTaskSection(
-                newTaskTitle: $newTaskTitle,
-                showingAddTask: $showingAddTask,
-                isAddFieldFocused: $isAddFieldFocused,
-                onAddTask: submitAddTask
-            )
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(Color(NSColor.windowBackgroundColor))
@@ -348,11 +369,16 @@ struct ContentView: View {
             resetFocusToActiveTask()
             updatePopoverHeight()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleHelpView)) { _ in
+            showingHelp.toggle()
+            updatePopoverHeight()
+        }
     }
 
     private func resetFocusToActiveTask() {
         focusedSection = .inProgress
         focusedIndex = 0
+        showingHelp = false
         showingAddTask = false
         newTaskTitle = ""
         isAddFieldFocused = false
@@ -371,106 +397,12 @@ struct ContentView: View {
         guard keyboardMonitor == nil else { return }
 
         keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if showingAddTask {
-                if event.keyCode == 53 {
-                    cancelAddTask()
-                    return nil
-                }
-
-                if event.keyCode == 36 && event.modifierFlags.contains(.command) {
-                    submitAddTask(makeActive: true)
-                    return nil
-                }
-
+            guard let action = KeyboardShortcutRegistry.firstMatchingAction(for: event, mode: currentShortcutMode) else {
                 return event
             }
 
-            if editingTaskID != nil {
-                if event.keyCode == 53 {
-                    cancelEdit()
-                    return nil
-                }
-
-                if event.keyCode == 36 {
-                    confirmEdit()
-                    return nil
-                }
-
-                return event
-            }
-
-            if event.modifierFlags.contains(.command) {
-                switch event.charactersIgnoringModifiers?.lowercased() {
-                case "n":
-                    showingAddTask = true
-                    isAddFieldFocused = true
-                    return nil
-                case "a":
-                    makeCurrentFocusedActive()
-                    return nil
-                case "d":
-                    deleteCurrentFocused()
-                    return nil
-                case "c":
-                    toggleCurrentFocusedCompletion()
-                    return nil
-                case "s":
-                    taskManager.toggleCurrentTaskTimer()
-                    return nil
-                case "r":
-                    startEditingFocused()
-                    return nil
-                case "q":
-                    NSApplication.shared.terminate(nil)
-                    return nil
-                default:
-                    break
-                }
-            }
-
-            let isCommandPressed = event.modifierFlags.contains(.command)
-
-            switch event.keyCode {
-            case 126:
-                if isCommandPressed {
-                    moveCurrentFocusedUp()
-                } else {
-                    navigateUp()
-                }
-                return nil
-            case 125:
-                if isCommandPressed {
-                    moveCurrentFocusedDown()
-                } else {
-                    navigateDown()
-                }
-                return nil
-            case 36:
-                toggleCurrentFocusedCompletion()
-                return nil
-            case 53:
-                focusedSection = .inProgress
-                focusedIndex = 0
-                return nil
-            default:
-                break
-            }
-
-            if let chars = event.charactersIgnoringModifiers,
-               chars.count == 1,
-               let digit = chars.first,
-               digit.isNumber,
-               !event.modifierFlags.contains(.command) {
-                let number = digit.wholeNumberValue ?? 0
-                let targetIndex = number == 0 ? 9 : number - 1
-                if targetIndex < taskManager.inProgressTasks.count {
-                    focusedSection = .inProgress
-                    focusedIndex = targetIndex
-                    return nil
-                }
-            }
-
-            return event
+            handleShortcutAction(action, event: event)
+            return nil
         }
     }
 
@@ -478,6 +410,69 @@ struct ContentView: View {
         guard let keyboardMonitor else { return }
         NSEvent.removeMonitor(keyboardMonitor)
         self.keyboardMonitor = nil
+    }
+
+    private func handleShortcutAction(_ action: KeyboardShortcutAction, event: NSEvent) {
+        switch action {
+        case .togglePopover:
+            break
+        case .toggleHelp:
+            showingHelp.toggle()
+        case .closeHelp:
+            showingHelp = false
+        case .newTask:
+            showingAddTask = true
+            isAddFieldFocused = true
+        case .makeActive:
+            makeCurrentFocusedActive()
+        case .toggleTimer:
+            taskManager.toggleCurrentTaskTimer()
+        case .toggleCompletion:
+            toggleCurrentFocusedCompletion()
+        case .deleteTask:
+            deleteCurrentFocused()
+        case .renameTask:
+            startEditingFocused()
+        case .quit:
+            NSApplication.shared.terminate(nil)
+        case .navigateUp:
+            navigateUp()
+        case .navigateDown:
+            navigateDown()
+        case .reorderUp:
+            moveCurrentFocusedUp()
+        case .reorderDown:
+            moveCurrentFocusedDown()
+        case .resetFocus:
+            focusedSection = .inProgress
+            focusedIndex = 0
+        case .quickSelect:
+            handleQuickSelect(event)
+        case .addTask:
+            submitAddTask()
+        case .addActiveTask:
+            submitAddTask(makeActive: true)
+        case .cancelAdd:
+            cancelAddTask()
+        case .confirmRename:
+            confirmEdit()
+        case .cancelRename:
+            cancelEdit()
+        }
+    }
+
+    private func handleQuickSelect(_ event: NSEvent) {
+        guard let chars = event.charactersIgnoringModifiers,
+              chars.count == 1,
+              let digit = chars.first,
+              digit.isNumber else { return }
+
+        let number = digit.wholeNumberValue ?? 0
+        let targetIndex = number == 0 ? 9 : number - 1
+        if targetIndex < taskManager.inProgressTasks.count {
+            focusedSection = .inProgress
+            focusedIndex = targetIndex
+        }
     }
 
     private func submitAddTask(makeActive: Bool = false) {
@@ -1127,6 +1122,53 @@ struct AddTaskSection: View {
         DispatchQueue.main.async {
             showingAddTask = false
         }
+    }
+}
+
+struct ShortcutsHelpView: View {
+    private var sections: [KeyboardShortcutSection] {
+        KeyboardShortcutSection.allCases.filter { !KeyboardShortcutRegistry.shortcuts(in: $0).isEmpty }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("help.title", tableName: "Localizable")
+                .font(.headline)
+                .padding(.horizontal)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
+
+            ForEach(sections) { section in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(LocalizedStringKey(section.titleKey), tableName: "Localizable")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+
+                    ForEach(KeyboardShortcutRegistry.shortcuts(in: section)) { shortcut in
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(shortcut.key)
+                                .font(.system(.caption, design: .monospaced))
+                                .fontWeight(.medium)
+                                .foregroundStyle(.primary)
+                                .frame(width: 72, alignment: .leading)
+
+                            Text(LocalizedStringKey(shortcut.descriptionKey), tableName: "Localizable")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 12)
+
+                if section != sections.last {
+                    Divider()
+                }
+            }
+        }
+        .padding(.bottom, 8)
     }
 }
 

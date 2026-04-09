@@ -349,6 +349,10 @@ struct ContentView: View {
                         isAddFieldFocused: $isAddFieldFocused,
                         onAddTask: submitAddTask
                     )
+
+                    Divider()
+
+                    ShortcutReferenceSection()
                 }
             }
         }
@@ -599,11 +603,6 @@ struct CurrentTaskHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("section.currentTask", tableName: "Localizable")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-
             if let currentTask = taskManager.currentTask {
                 let isRunning = taskManager.isCurrentTaskRunning
 
@@ -1106,6 +1105,34 @@ struct AddTaskSection: View {
         DispatchQueue.main.async {
             showingAddTask = false
         }
+    }
+}
+
+struct ShortcutReferenceSection: View {
+    private let items: [(titleKey: String, shortcut: String)] = [
+        ("shortcut.reference.togglePopover", "⌃⌥S"),
+        ("shortcut.reference.help", "⌘?"),
+        ("shortcut.reference.quit", "⌘Q")
+    ]
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ForEach(items, id: \.titleKey) { item in
+                HStack(spacing: 4) {
+                    Text(LocalizedStringKey(item.titleKey), tableName: "Localizable")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    Text(item.shortcut)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 10)
     }
 }
 
